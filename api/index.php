@@ -393,6 +393,11 @@ if (!$conn->connect_error) {
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <!-- CSS tách riêng - cache trình duyệt, tải nhanh hơn -->
     <link rel="stylesheet" href="style.css?v=<?php echo filemtime('style.css'); ?>">
+    <style>
+        /* Hiển thị login trước khi JS chạy, tránh màn trắng */
+        #login_screen { display: block !important; }
+        #app_screen, #superadmin_screen { display: none !important; }
+    </style>
 </head>
 <body class="dark-mode">
 
@@ -651,6 +656,6 @@ if (!$conn->connect_error) {
 </div>
 
 <!-- JS tách riêng - trình duyệt cache, không tải lại mỗi lần -->
-<script src="script.js?v=<?php echo filemtime('script.js'); ?>" defer></script>
+<script src="script.js?v=<?php echo filemtime('script.js'); ?>"></script>
 </body>
 </html>
