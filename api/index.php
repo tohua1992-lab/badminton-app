@@ -51,16 +51,22 @@ $conn->real_connect($servername, $username, $password, $dbname, $port, NULL, MYS
 if (!$conn->connect_error) {
     $conn->set_charset("utf8mb4");
     mysqli_report(MYSQLI_REPORT_OFF);
+// --- VŨ KHÍ TỐI THƯỢNG: KIỂM TRA & VÁ DATABASE THÔNG MINH ---
+    function addColumnSafe($conn, $table, $col, $type) {
+        $check = $conn->query("SHOW COLUMNS FROM `$table` LIKE '$col'");
+        if ($check && $check->num_rows == 0) {
+            $conn->query("ALTER TABLE `$table` ADD COLUMN `$col` $type");
+        }
+    }
 
-    // --- VŨ KHÍ HẠNG NẶNG: TỰ ĐỘNG VÁ DATABASE MỌI LÚC MỌI NƠI ---
-    $conn->query("ALTER TABLE matches MODIFY COLUMN id BIGINT");
-    $conn->query("ALTER TABLE matches ADD COLUMN match_time VARCHAR(20) DEFAULT NULL");
-    $conn->query("ALTER TABLE matches ADD COLUMN team1 TEXT DEFAULT NULL");
-    $conn->query("ALTER TABLE matches ADD COLUMN team2 TEXT DEFAULT NULL");
-    $conn->query("ALTER TABLE matches ADD COLUMN winner VARCHAR(20) DEFAULT NULL");
-    $conn->query("ALTER TABLE matches ADD COLUMN bet INT DEFAULT 1");
-    $conn->query("ALTER TABLE matches ADD COLUMN water INT DEFAULT 0");
-    $conn->query("ALTER TABLE matches ADD COLUMN score VARCHAR(50) DEFAULT NULL");
+    $conn->query("ALTER TABLE matches MODIFY COLUMN id BIGINT"); 
+    addColumnSafe($conn, 'matches', 'match_time', 'VARCHAR(20)');
+    addColumnSafe($conn, 'matches', 'team1', 'VARCHAR(500)');
+    addColumnSafe($conn, 'matches', 'team2', 'VARCHAR(500)');
+    addColumnSafe($conn, 'matches', 'winner', 'VARCHAR(20)');
+    addColumnSafe($conn, 'matches', 'bet', 'INT DEFAULT 1');
+    addColumnSafe($conn, 'matches', 'water', 'INT DEFAULT 0');
+    addColumnSafe($conn, 'matches', 'score', 'VARCHAR(50)');
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
