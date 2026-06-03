@@ -51,7 +51,8 @@ $conn->real_connect($servername, $username, $password, $dbname, $port, NULL, MYS
 if (!$conn->connect_error) {
     $conn->set_charset("utf8mb4");
     mysqli_report(MYSQLI_REPORT_OFF);
-
+// Tự động thêm cột match_time nếu database đang bị thiếu
+    $conn->query("ALTER TABLE matches ADD COLUMN match_time VARCHAR(20) DEFAULT NULL");
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         $action = $input['action'] ?? '';
