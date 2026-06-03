@@ -52,7 +52,11 @@ if (!$conn->connect_error) {
     $conn->set_charset("utf8mb4");
     mysqli_report(MYSQLI_REPORT_OFF);
 // Tự động thêm cột match_time nếu database đang bị thiếu
-    $conn->query("ALTER TABLE matches ADD COLUMN match_time VARCHAR(20) DEFAULT NULL");
+    // --- TỰ ĐỘNG NÂNG CẤP DATABASE ---
+    $conn->query("ALTER TABLE matches MODIFY COLUMN id BIGINT"); // Mở rộng ID để lưu được chuỗi Date.now()
+    $conn->query("ALTER TABLE matches ADD COLUMN match_time VARCHAR(20) DEFAULT NULL"); // Cột giờ
+    $conn->query("ALTER TABLE matches ADD COLUMN water INT DEFAULT 0"); // Cột tiền nước
+    $conn->query("ALTER TABLE matches ADD COLUMN score VARCHAR(50) DEFAULT NULL"); // Cột tỉ số
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         $action = $input['action'] ?? '';
@@ -259,8 +263,8 @@ if (!$conn->connect_error) {
                 $stmt = $conn->prepare("INSERT INTO matches (id, group_id, match_date, match_time, team1, team2, bet, water, score, winner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 
                 if (!$stmt) {
-                    sendResponse(['status' => 'error', 'message' => 'Lỗi cấu trúc câu lệnh SQL. Hãy chắc chắn bảng matches có cột match_time!']);
-                }
+    sendResponse(['status' => 'error', 'message' => 'Lỗi SQL thực tế là: ' . $conn->error]);
+}
 
                 $t1 = json_encode($m['team1'], JSON_UNESCAPED_UNICODE); 
                 $t2 = json_encode($m['team2'], JSON_UNESCAPED_UNICODE);
