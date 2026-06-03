@@ -1,10 +1,9 @@
 <?php
-// Tạm bật báo lỗi để không bị màn hình trắng nếu có trục trặc
-ini_set('display_errors', 1); 
-error_reporting(E_ALL); 
+// Tắt sạch báo lỗi để không làm hỏng luồng dữ liệu JSON
+ini_set('display_errors', 0); 
+error_reporting(0); 
 session_start();
 date_default_timezone_set('Asia/Ho_Chi_Minh');
-
 // THÔNG TIN KẾT NỐI AIVEN CLOUD
 $servername = "mysql-3c964605-badmintonappver2.h.aivencloud.com"; 
 $username = "avnadmin";      
@@ -29,11 +28,7 @@ if (!$conn->connect_error) {
     $conn->set_charset("utf8mb4");
     mysqli_report(MYSQLI_REPORT_OFF);
 
-    // TỰ ĐỘNG TẠO BẢNG CHO DATABASE MỚI TRÊN AIVEN
-    $conn->query("CREATE TABLE IF NOT EXISTS groups_account (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, raw_password VARCHAR(255) DEFAULT NULL, group_name VARCHAR(100) NOT NULL, expire_date DATE DEFAULT '2030-12-31', banner_data MEDIUMTEXT DEFAULT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-    $conn->query("CREATE TABLE IF NOT EXISTS matches (id BIGINT PRIMARY KEY, group_id INT NOT NULL, match_date DATE, match_time VARCHAR(20), team1 JSON, team2 JSON, bet INT, water INT DEFAULT 0, score VARCHAR(20) DEFAULT NULL, winner VARCHAR(10)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-    $conn->query("CREATE TABLE IF NOT EXISTS avatars (group_id INT NOT NULL, player_name VARCHAR(255) NOT NULL, image_data MEDIUMTEXT, PRIMARY KEY (group_id, player_name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-
+    
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         $action = $input['action'] ?? '';
@@ -221,7 +216,8 @@ if (!$conn->connect_error) {
                 $m = $input['match'];
                 $stmt = $conn->prepare("INSERT INTO matches (id, group_id, match_date, match_time, team1, team2, bet, water, score, winner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $t1 = json_encode($m['team1'], JSON_UNESCAPED_UNICODE); $t2 = json_encode($m['team2'], JSON_UNESCAPED_UNICODE);
-                $stmt->bind_param("iissssiiss", $m['id'], $grp_id, $m['date'], $m['time'], $t1, $t2, $m['bet'], $m['water'], $m['score'], $m['winner']);
+                // Đổi chữ i đầu tiên thành s
+                $stmt->bind_param("sissssiiss", $m['id'], $grp_id, $m['date'], $m['time'], $t1, $t2, $m['bet'], $m['water'], $m['score'], $m['winner']);
                 $stmt->execute();
                 sendResponse(['status' => 'success']);
             }
@@ -230,14 +226,16 @@ if (!$conn->connect_error) {
                 $m = $input['match'];
                 $stmt = $conn->prepare("UPDATE matches SET match_date=?, team1=?, team2=?, bet=?, water=?, score=?, winner=? WHERE id=? AND group_id=?");
                 $t1 = json_encode($m['team1'], JSON_UNESCAPED_UNICODE); $t2 = json_encode($m['team2'], JSON_UNESCAPED_UNICODE);
-                $stmt->bind_param("sssiissii", $m['date'], $t1, $t2, $m['bet'], $m['water'], $m['score'], $m['winner'], $m['id'], $grp_id);
+                // Đổi chữ i thứ 8 thành s
+                $stmt->bind_param("sssiisssi", $m['date'], $t1, $t2, $m['bet'], $m['water'], $m['score'], $m['winner'], $m['id'], $grp_id);
                 $stmt->execute();
                 sendResponse(['status' => 'success']);
             }
 
             if ($action === 'delete' && $role === 'admin') {
                 $stmt = $conn->prepare("DELETE FROM matches WHERE id=? AND group_id=?");
-                $stmt->bind_param("ii", $input['id'], $grp_id);
+                // Đổi chữ i đầu tiên thành s
+                $stmt->bind_param("si", $input['id'], $grp_id);
                 $stmt->execute();
                 sendResponse(['status' => 'success']);
             }
@@ -988,7 +986,7 @@ if (!$conn->connect_error) {
             </div>
             <div class="table-responsive">
                 <table>
-                    z
+                    
                     <tbody id="dashboard_body"></tbody>
                 </table>
             </div>
