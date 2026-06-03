@@ -39,8 +39,6 @@ if (!$conn->connect_error) {
             $raw_p = $input['new_pass'];
             $p = password_hash($raw_p, PASSWORD_DEFAULT);
             $n = $conn->real_escape_string($input['new_name']);
-            // HSD chính xác 1 tháng kể từ hôm nay
-            // Tài khoản Miễn phí vĩnh viễn (Đặt hạn đến năm 2099)
             $exp = '2099-12-31';
             
             $stmt = $conn->prepare("INSERT INTO groups_account (username, password, raw_password, group_name, expire_date) VALUES (?, ?, ?, ?, ?)");
@@ -71,10 +69,6 @@ if (!$conn->connect_error) {
             if ($res && $res->num_rows > 0) {
                 $row = $res->fetch_assoc();
                 if (password_verify($pass, $row['password'])) {
-                    $today = date('Y-m-d');
-                    if (!empty($row['expire_date']) && $row['expire_date'] < $today) {
-                        //sendResponse(['status' => 'error', 'message' => '❌ Tài khoản nhóm này đã hết hạn License. Vui lòng liên hệ Admin gia hạn!']);
-                    }
                     $_SESSION['group_id'] = $row['id'];
                     $_SESSION['group_name'] = $row['group_name'];
                     $_SESSION['role'] = 'admin';
@@ -92,10 +86,6 @@ if (!$conn->connect_error) {
             $res = $conn->query("SELECT * FROM groups_account WHERE username = '$user'");
             if ($res && $res->num_rows > 0) {
                 $row = $res->fetch_assoc();
-                $today = date('Y-m-d');
-                if (!empty($row['expire_date']) && $row['expire_date'] < $today) {
-                    //sendResponse(['status' => 'error', 'message' => '❌ Nhóm này đã hết hạn dịch vụ. Không thể xem!']);
-                }
                 $_SESSION['group_id'] = $row['id'];
                 $_SESSION['group_name'] = $row['group_name'];
                 $_SESSION['role'] = 'guest';
@@ -191,18 +181,11 @@ if (!$conn->connect_error) {
             $grp_id = (int)$_SESSION['group_id'];
             $role = $_SESSION['role'];
 
-            $checkExp = $conn->query("SELECT expire_date FROM groups_account WHERE id = $grp_id")->fetch_assoc();
-            $today = date('Y-m-d');
-            if (!empty($checkExp['expire_date']) && $checkExp['expire_date'] < $today) {
-                 //sendResponse(['status' => 'expired']);
-		
-            }
-	// --- ĐỔI MẬT KHẨU CHO GROUP ADMIN ---
+            // --- ĐỔI MẬT KHẨU CHO GROUP ADMIN ---
             if ($action === 'change_password' && $role === 'admin') {
                 $new_raw = $input['new_password'];
                 $new_hash = password_hash($new_raw, PASSWORD_DEFAULT);
                 
-                // Cập nhật cả password mã hoá và raw_password để Super Admin có thể xem
                 $stmt = $conn->prepare("UPDATE groups_account SET password=?, raw_password=? WHERE id=?");
                 $stmt->bind_param("ssi", $new_hash, $new_raw, $grp_id);
                 
@@ -212,6 +195,7 @@ if (!$conn->connect_error) {
                     sendResponse(['status' => 'error', 'message' => 'Lỗi cập nhật mật khẩu.']);
                 }
             }
+            
             if ($action === 'add' && $role === 'admin') {
                 $m = $input['match'];
                 $stmt = $conn->prepare("INSERT INTO matches (id, group_id, match_date, match_time, team1, team2, bet, water, score, winner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -290,24 +274,22 @@ if (!$conn->connect_error) {
                 sendResponse(['status' => 'success']);
             }
 
-	// --- LƯU ẢNH CHỤP TỪ APP ---
-        if ($action === 'save_capture') {
-            $base64_image = $input['image']; 
-            $upload_dir = 'uploads/captures/';
-            if (!file_exists($upload_dir)) mkdir($upload_dir, 0777, true);
+            if ($action === 'save_capture') {
+                $base64_image = $input['image']; 
+                $upload_dir = 'uploads/captures/';
+                if (!file_exists($upload_dir)) mkdir($upload_dir, 0777, true);
 
-            list($type, $data) = explode(';', $base64_image);
-            list(, $data)      = explode(',', $data);
-            $data = base64_decode($data);
+                list($type, $data) = explode(';', $base64_image);
+                list(, $data)      = explode(',', $data);
+                $data = base64_decode($data);
 
-            // Tạo tên file ngẫu nhiên
-            $filename = $upload_dir . 'capture_' . time() . '.jpg';
-            file_put_contents($filename, $data);
+                $filename = $upload_dir . 'capture_' . time() . '.jpg';
+                file_put_contents($filename, $data);
 
-            // Trả về link file thật
-            sendResponse(['status' => 'success', 'url' => $filename]);
-        }
+                sendResponse(['status' => 'success', 'url' => $filename]);
+            }
 
+            // 1. CHỈ TẢI LỊCH SỬ TRẬN ĐẤU (RẤT NHẸ - CHẠY MỖI 35 GIÂY)
             if ($action === 'fetch') {
                 $matchesData = [];
                 $result = $conn->query("SELECT * FROM matches WHERE group_id = $grp_id ORDER BY id ASC");
@@ -323,6 +305,11 @@ if (!$conn->connect_error) {
                         ];
                     }
                 }
+                sendResponse(['status' => 'success', 'data' => $matchesData]);
+            }
+
+            // 2. CHỈ TẢI AVATAR VÀ BANNER (RẤT NẶNG - CHỈ CHẠY 1 LẦN LÚC ĐĂNG NHẬP)
+            if ($action === 'fetch_media') {
                 $avatarsData = [];
                 $resultAva = $conn->query("SELECT * FROM avatars WHERE group_id = $grp_id");
                 if ($resultAva && $resultAva->num_rows > 0) {
@@ -332,15 +319,14 @@ if (!$conn->connect_error) {
                 }
                 
                 $bannerQ = $conn->query("SELECT banner_data FROM groups_account WHERE id = $grp_id");
-                $bannerData = $bannerQ->fetch_assoc()['banner_data'];
+                $bannerData = $bannerQ->fetch_assoc()['banner_data'] ?? '';
 
-                sendResponse(['status' => 'success', 'data' => $matchesData, 'avatars' => $avatarsData, 'banner' => $bannerData]);
+                sendResponse(['status' => 'success', 'avatars' => $avatarsData, 'banner' => $bannerData]);
             }
         }
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -355,414 +341,8 @@ if (!$conn->connect_error) {
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
-    <style>
-        /* =========================================
-           HỆ THỐNG 3D NEUMORPHISM PREMIUM DARK
-           ========================================= */
-        :root { 
-            --bg-body: #ebf0f5; /* Light mode base */
-            --bg-panel: linear-gradient(145deg, #ffffff, #e6e9ee);
-            --bg-input: #f4f7fa;
-            --primary: #3498db; --secondary: #2980b9; 
-            --success: #27ae60; --danger: #e74c3c; 
-            --text-main: #2c3e50; --text-muted: #7f8c8d; 
-            --border-color: rgba(255,255,255,0.5);
-            /* Shadows Light */
-            --shadow-outer: 8px 8px 16px rgba(166, 180, 200, 0.6), -8px -8px 16px rgba(255,255,255, 0.8);
-            --shadow-inner: inset 4px 4px 8px rgba(166, 180, 200, 0.6), inset -4px -4px 8px rgba(255,255,255, 0.8);
-            --glow-active: 0 0 15px rgba(39, 174, 96, 0.3);
-        }
-
-        .dark-mode {
-            --bg-body: #12141c; /* Deep Dark 3D base */
-            --bg-panel: linear-gradient(145deg, #161922, #11131a);
-            --bg-input: #0a0c11;
-            --primary: #4facfe; --secondary: #3498db; 
-            --success: #2ecc71; --danger: #ff4757;
-            --text-main: #f0f6fc; --text-muted: #8b949e; 
-            --border-color: rgba(255,255,255,0.03);
-            /* Shadows Deep Dark 3D */
-            --shadow-outer: 8px 8px 16px rgba(0,0,0,0.6), -4px -4px 10px rgba(255,255,255,0.03), inset 1px 1px 2px rgba(255,255,255,0.02);
-            --shadow-inner: inset 4px 4px 8px rgba(0,0,0,0.8), inset -2px -2px 6px rgba(255,255,255,0.02);
-            --glow-active: 0 0 15px rgba(46, 204, 113, 0.2), inset 0 0 10px rgba(46, 204, 113, 0.1);
-        }
-
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-body); color: var(--text-main); margin: 0; padding: 15px; transition: all 0.3s ease; }
-        .container { max-width: 900px; margin: 0 auto; position: relative;}
-        
-        /* BANNERS */
-        .banner-login { width: 100%; object-fit: cover; border-radius: 20px; margin-bottom: 20px; box-shadow: var(--shadow-outer); height: 140px; }
-        .banner-container { position: relative; border-radius: 20px; margin-bottom: 25px; overflow: hidden; box-shadow: var(--shadow-outer); border: 1px solid var(--border-color);}
-        .banner-container .banner-main { display: block; width: 100%; height: 200px; object-fit: cover; transition: 0.3s;}
-        .banner-overlay-flex { width: 100%; height: 100%; background: rgba(0,0,0,0.6); color: white; display: flex; justify-content: center; align-items: center; font-size: 18px; font-weight: bold; cursor: pointer; opacity: 0; transition: 0.3s; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); }
-        .banner-container:hover .banner-overlay-flex { opacity: 1; }
-
-        /* 3D PANELS (SECTIONS) */
-        .auth-screen, .header, .section, .board-half, .edit-box { 
-            background: var(--bg-panel); 
-            padding: 20px; 
-            border-radius: 20px; 
-            box-shadow: var(--shadow-outer); 
-            border: 1px solid var(--border-color);
-            margin-bottom: 25px;
-        }
-        .auth-screen { max-width: 450px; margin: 50px auto; text-align: center; }
-        .header { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; }
-        h1 { color: var(--primary); margin: 0; font-size: 22px; display: flex; align-items: center; flex-wrap: wrap; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);}
-        
-        /* 3D INPUTS */
-        input[type="text"], input[type="password"], input[type="number"], input[type="date"] { 
-            width: 100%; padding: 14px 15px; margin-bottom: 12px; 
-            border: 1px solid var(--border-color); border-radius: 12px; 
-            box-sizing: border-box; font-size: 15px; 
-            background: var(--bg-input); color: var(--text-main); 
-            box-shadow: var(--shadow-inner); outline: none; transition: 0.3s;
-        }
-        input:focus { border-color: var(--primary); box-shadow: var(--shadow-inner), 0 0 5px rgba(79, 172, 254, 0.3); }
-        
-        /* 3D BUTTONS */
-        button { 
-            padding: 14px 20px; border: none; border-radius: 12px; cursor: pointer; 
-            font-weight: 900; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;
-            color: #fff; transition: all 0.15s ease; position: relative;
-        }
-        .btn-primary { background: linear-gradient(145deg, #4facfe, #00f2fe); box-shadow: 0 6px 0 #0088cc, 0 10px 15px rgba(0, 136, 204, 0.4), inset 0 2px 2px rgba(255,255,255,0.4); }
-        .btn-primary:active { transform: translateY(6px); box-shadow: 0 0 0 #0088cc, 0 2px 5px rgba(0, 136, 204, 0.4), inset 0 3px 5px rgba(0,0,0,0.2); }
-        
-        .btn-success { background: linear-gradient(145deg, #2ecc71, #24a85a); box-shadow: 0 6px 0 #1b8045, 0 10px 15px rgba(39, 174, 96, 0.4), inset 0 2px 2px rgba(255,255,255,0.4); }
-        .btn-success:active { transform: translateY(6px); box-shadow: 0 0 0 #1b8045, 0 2px 5px rgba(39, 174, 96, 0.4), inset 0 3px 5px rgba(0,0,0,0.2); }
-        
-        .btn-danger { background: linear-gradient(145deg, #ff4757, #ff6b81); box-shadow: 0 6px 0 #c0392b, 0 10px 15px rgba(231, 76, 60, 0.4), inset 0 2px 2px rgba(255,255,255,0.4); }
-        .btn-danger:active { transform: translateY(6px); box-shadow: 0 0 0 #c0392b, 0 2px 5px rgba(231, 76, 60, 0.4), inset 0 3px 5px rgba(0,0,0,0.2); }
-        
-        .btn-info { background: linear-gradient(145deg, #9b59b6, #8e44ad); box-shadow: 0 6px 0 #6c3483, 0 10px 15px rgba(155, 89, 182, 0.4), inset 0 2px 2px rgba(255,255,255,0.4); }
-        .btn-info:active { transform: translateY(6px); box-shadow: 0 0 0 #6c3483, 0 2px 5px rgba(155, 89, 182, 0.4), inset 0 3px 5px rgba(0,0,0,0.2); }
-        
-        .btn-warning { background: linear-gradient(145deg, #f1c40f, #f39c12); box-shadow: 0 6px 0 #d68910, 0 10px 15px rgba(243, 156, 18, 0.4), inset 0 2px 2px rgba(255,255,255,0.4); color: #000; }
-        .btn-warning:active { transform: translateY(6px); box-shadow: 0 0 0 #d68910, 0 2px 5px rgba(243, 156, 18, 0.4), inset 0 3px 5px rgba(0,0,0,0.2); }
-
-        .btn-outline { background: var(--bg-panel); color: var(--text-main); box-shadow: var(--shadow-outer); border: 1px solid var(--border-color); }
-        .btn-outline:active { box-shadow: var(--shadow-inner); transform: translateY(2px); }
-        
-        /* TABS 3D */
-        .nav-tabs { display: flex; gap: 15px; margin-bottom: 25px; padding: 5px;}
-        .tab-btn { flex: 1; padding: 15px; background: var(--bg-panel); color: var(--text-muted); box-shadow: var(--shadow-outer); border-radius: 16px; transition: 0.3s; border: 1px solid var(--border-color); }
-        .tab-btn.active { color: var(--primary); box-shadow: var(--shadow-inner); }
-        .tab-pane { display: none; }
-        .tab-pane.active { display: block; animation: fadeIn 0.4s ease-in-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-        /* BỘ LỌC BAR */
-        .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
-        .filter-bar input[type="date"] { margin-bottom: 0; }
-
-        /* FORM THÊM TRẬN 3D */
-        .match-date-input-container { text-align: center; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 15px; background: var(--bg-panel); border: 1px solid var(--border-color); padding: 15px; border-radius: 16px; box-shadow: var(--shadow-outer);}
-        .match-form { display: grid; grid-template-columns: 1fr 110px 1fr; gap: 15px; align-items: center; margin-top: 15px; }
-        
-        /* UI Form Nâng cấp */
-        .team-box { background: var(--bg-panel); padding: 15px 15px; border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-outer); transition: all 0.3s ease; position: relative; }
-        .team-box.active { border-color: rgba(46, 204, 113, 0.6); box-shadow: var(--glow-active), var(--shadow-outer); }
-        .team-box h3 { text-align: center; margin-top: 0; margin-bottom: 15px; font-size: 16px; color: var(--primary); font-weight: 900;}
-        
-        /* 3D WINNER SELECTOR */
-        .winner-selector { display: flex; justify-content: center; margin-top: 15px; }
-        .winner-selector label { display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--bg-input); box-shadow: var(--shadow-inner); border: 1px solid var(--border-color); padding: 12px 20px; border-radius: 16px; cursor: pointer; width: 100%; transition: 0.3s; color: var(--text-muted); font-weight: bold;}
-        .winner-selector input { margin: 0; cursor: pointer; width: 16px; height: 16px; display: none;}
-        .winner-selector input:checked + span { color: var(--success); text-shadow: 0 0 5px rgba(39, 174, 96, 0.3); }
-        .team-box.active .winner-selector label { background: rgba(46, 204, 113, 0.1); border-color: rgba(46, 204, 113, 0.5); box-shadow: none; color: var(--text-main); }
-
-        /* HUY HIỆU VS VÀNG NỔI BẬT */
-        .vs-badge { width: 55px; height: 55px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, #ffe259 0%, #ffa751 100%); display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 20px; font-style: italic; color: #8e4a00; box-shadow: 0 8px 20px rgba(255, 167, 81, 0.4), inset 2px 2px 5px rgba(255,255,255,0.6), inset -2px -2px 5px rgba(0,0,0,0.3); border: 3px solid var(--bg-body); z-index: 10; margin: auto;}
-
-        /* FOOTER INPUTS 3D */
-        .form-footer { margin-top: 25px; display: flex; justify-content: space-between; align-items: center; background: var(--bg-panel); border: 1px solid var(--border-color); box-shadow: var(--shadow-outer); padding: 20px; border-radius: 20px; }
-        
-        /* TABLE 3D */
-        .table-responsive { overflow-x: auto; border-radius: 16px; box-shadow: var(--shadow-outer); border: 1px solid var(--border-color); background: var(--bg-panel); margin-top: 15px;}
-        table { width: 100%; border-collapse: collapse; min-width: 550px; }
-        table, th, td { border: none; }
-        th { background: rgba(0,0,0,0.2); color: var(--text-muted); font-weight: 900; text-transform: uppercase; letter-spacing: 1px; padding: 15px; border-bottom: 1px solid var(--border-color);}
-        td { padding: 15px; text-align: center; font-size: 15px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.02);}
-        
-        .row-top1 td { color: #f1c40f !important; background: rgba(241, 196, 15, 0.05); }
-        .row-top2 td { color: #bdc3c7 !important; }
-        .row-top3 td { color: #e67e22 !important; }
-        .row-bot1 td { color: var(--danger) !important; background: rgba(231, 76, 60, 0.05); }
-        .row-bot2 td, .row-bot3 td { color: #e74c3c !important; }
-
-        /* LỊCH SỬ CARD V2 PREMIUM 3D */
-        .history-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; margin-top: 20px; }
-        .match-card-v2 { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 20px; padding: 20px 15px; padding-bottom: 40px; box-shadow: var(--shadow-outer); position: relative; overflow: hidden; transition: all 0.3s ease; }
-        .match-card-v2:hover { transform: translateY(-5px); border-color: var(--primary); }
-        .match-card-v2::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, var(--primary), var(--success)); }
-        
-        .match-info-header { text-align: center; font-size: 11px; color: var(--text-muted); margin-bottom: 15px; letter-spacing: 1px; text-transform: uppercase; font-weight: 900;}
-        .match-battle-area { display: flex; justify-content: space-between; align-items: center; position: relative; }
-        .team-col { flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: 0.3s;}
-        .team-col.loser .avatar-split-container, .team-col.loser .team-names-v2 { filter: grayscale(100%); opacity: 0.4; }
-        
-        .avatar-split-container { position: relative; width: 80px; height: 80px; margin-bottom: 10px;}
-        .ava-p1, .ava-p2 { width: 50px; height: 50px; border-radius: 50%; position: absolute; background: var(--bg-body); display: flex; justify-content: center; align-items: center; font-weight: 900; overflow: hidden; z-index: 2; font-size: 18px; box-shadow: 0 4px 10px rgba(0,0,0,0.5), inset 2px 2px 4px rgba(255,255,255,0.2); border: 2px solid var(--border-color);}
-        .ava-p1 img, .ava-p2 img { width: 100%; height: 100%; object-fit: cover; }
-        .ava-p1 { top: -2px; left: -2px; }
-        .ava-p2 { bottom: -2px; right: -2px; z-index: 1;}
-        .avatar-split-container.single-mode .ava-p1 { width: 100%; height: 100%; top: 0; left: 0; border-radius: 50%; font-size: 28px;}
-        
-        .diagonal-line { position: absolute; top: 50%; left: 50%; width: 160%; height: 2px; background: rgba(255,255,255,0.2); transform: translate(-50%, -50%) rotate(-45deg); z-index: 1; }
-        .team-names-v2 { text-align: center; font-size: 13px; line-height: 1.4; font-weight: bold; color: var(--text-main); width: 100%;}
-        
-        .stamp { position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); font-size: 16px; font-weight: 900; padding: 4px 10px; border: 2px solid; border-radius: 8px; z-index: 10; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); opacity: 0.9; background: var(--bg-panel); backdrop-filter: blur(2px);}
-        .stamp.win { color: var(--success); border-color: var(--success); }
-        .stamp.lose { color: var(--danger) !important; border-color: var(--danger) !important; }
-        
-        .vs-col { width: 70px; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; z-index: 5; margin: 0 10px;}
-        .vs-fire-text { font-size: 20px; font-weight: 900; font-style: italic; color: var(--text-muted); opacity: 0.5; margin-bottom: 5px;}
-        .bet-badge { background: var(--bg-input); color: var(--text-main); padding: 4px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; margin-top: 5px; box-shadow: var(--shadow-inner); border: 1px solid var(--border-color); white-space: nowrap;}
-        .score-badge { color: #fff; background: linear-gradient(145deg, #9b59b6, #8e44ad); box-shadow: 0 4px 10px rgba(155, 89, 182, 0.4); border: none; font-size: 11px;}
-        
-        .match-card-v2 .card-actions { position: absolute; bottom: 12px; right: 12px; display: flex; gap: 8px; opacity: 0; transition: all 0.3s ease; }
-        .match-card-v2:hover .card-actions { opacity: 1; }
-        .match-card-v2 .card-actions button { padding: 6px 12px; font-size: 11px; min-height: 28px; box-shadow: var(--shadow-outer); transform: translateY(0);}
-        .match-card-v2 .card-actions button:active { box-shadow: var(--shadow-inner); }
-        @media (max-width: 768px) { .match-card-v2 .card-actions { opacity: 1; } }
-
-        /* PODIUM & STATS 3D */
-        .boards-container { display: flex; flex-wrap: wrap; gap: 25px; margin-top: 15px; }
-        .board-half { flex: 1; min-width: 300px; }
-        .board-half h3 { text-align: center; margin-top: 0; font-size: 20px; font-weight: 900; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);}
-        .podium-container { display: flex; justify-content: center; align-items: flex-end; gap: 10px; margin-top: 40px; min-height: 180px; }
-        .podium-box { width: 30%; text-align: center; border-radius: 15px 15px 0 0; color: white; padding-top: 15px; font-weight: bold; position: relative; display: flex; flex-direction: column; transition: 0.3s; box-shadow: var(--shadow-outer); border: 1px solid var(--border-color); border-bottom: none;}
-        
-        .podium-1 { background: linear-gradient(145deg, #f1c40f, #f39c12); height: 170px; z-index: 3; }
-        .podium-2 { background: linear-gradient(145deg, #bdc3c7, #95a5a6); height: 140px; z-index: 2; }
-        .podium-3 { background: linear-gradient(145deg, #d35400, #e67e22); height: 120px; z-index: 1; }
-        .podium-bot-1 { background: linear-gradient(145deg, #c0392b, #e74c3c); height: 170px; z-index: 3; }
-        .podium-bot-2, .podium-bot-3 { background: linear-gradient(145deg, #7f8c8d, #95a5a6); height: 130px; z-index: 2; }
-	.podium-water-1 { background: linear-gradient(145deg, #00a8ff, #0097e6); height: 170px; z-index: 3; }
-        .podium-water-2, .podium-water-3 { background: linear-gradient(145deg, #74b9ff, #0984e3); height: 130px; z-index: 2; }
-        
-        .podium-avatar { width: 55px; height: 55px; background: var(--bg-body); border-radius: 50%; margin: -45px auto 10px auto; display: flex; align-items: center; justify-content: center; font-size: 24px; border: 3px solid #fff; color: var(--text-main); box-shadow: 0 5px 15px rgba(0,0,0,0.5), inset 2px 2px 5px rgba(0,0,0,0.1); overflow: hidden;}
-        .podium-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-        .podium-name { font-size: 14px; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; text-shadow: 1px 1px 2px rgba(0,0,0,0.5); }
-        .podium-score { font-size: 22px; font-weight: 900; background: rgba(0,0,0,0.3); margin: auto 10px 15px 10px; border-radius: 10px; padding: 4px 0; box-shadow: var(--shadow-inner);}
-
-        .stats-grid-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 25px; margin-top: 20px; }
-        .stat-card { display: flex; background: var(--bg-panel); border-radius: 24px; padding: 20px; box-shadow: var(--shadow-outer); border: 1px solid var(--border-color); align-items: center; gap: 20px; transition: 0.3s; }
-        .stat-avatar { width: 100px; height: 140px; border-radius: 16px; background: var(--bg-body); color: var(--text-main); display: flex; justify-content: center; align-items: center; font-size: 40px; font-weight: 900; flex-shrink: 0; box-shadow: var(--shadow-inner); border: 1px solid var(--border-color); position: relative; overflow: hidden; }
-        .stat-avatar img { width: 100%; height: 100%; object-fit: cover; }
-	.upload-overlay {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    background: rgba(0, 0, 0, 0.7);
-    color: #fff;
-    font-size: 12px;
-    padding: 6px 0;
-    text-align: center;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.stat-avatar:hover .upload-overlay {
-    opacity: 1;
-}
-        .stat-info { flex-grow: 1; }
-        .stat-name { margin: 0 0 15px 0; font-size: 20px; color: var(--primary); font-weight: 900; border-bottom: 2px dashed var(--border-color); padding-bottom: 10px;}
-        .stat-details-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; }
-        .stat-box { background: var(--bg-input); padding: 10px 5px; border-radius: 12px; display: flex; flex-direction: column; justify-content: center; box-shadow: var(--shadow-inner); border: 1px solid var(--border-color);}
-        .stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin-bottom: 4px; }
-        .stat-val { font-size: 16px; font-weight: 900; color: var(--text-main); }
-
-        /* DANH HIỆU */
-        .badge-title { display: inline-block; font-size: 10px; padding: 4px 8px; border-radius: 12px; margin-left: 8px; font-weight: 900; vertical-align: middle; box-shadow: 0 2px 5px rgba(0,0,0,0.3); color: #fff;}
-        .title-top1 { background: linear-gradient(145deg, #f1c40f, #f39c12); border: 1px solid #d35400; }
-        .title-top23 { background: linear-gradient(145deg, #bdc3c7, #7f8c8d); border: 1px solid #34495e; }
-        .title-bot { background: linear-gradient(145deg, #e74c3c, #c0392b); border: 1px solid #900; }
-        .title-water { background: linear-gradient(145deg, #00a8ff, #0097e6); border: 1px solid #0097e6; }
-
-        @media (max-width: 768px) {
-            .header { flex-direction: column; gap: 15px; }
-            .match-form { grid-template-columns: 1fr; gap: 15px; }
-            
-            /* Tối ưu cột giữa (VS và Tỉ số) cho Mobile */
-            .center-col { flex-direction: column-reverse !important; margin: 5px 0; }
-            .vs-badge { position: relative; top: auto; left: auto; transform: none; margin: 0 auto; border: 3px solid var(--bg-body); }
-            
-            /* Fix lỗi Điểm Cược & Độ Nước bị đè/tràn trên Mobile */
-            .form-footer { padding: 15px; }
-            .form-footer > div:first-child { flex-direction: row; flex-wrap: wrap; gap: 10px; }
-            .form-footer > div:first-child > div { flex: 1; min-width: 45%; padding: 12px; }
-            .form-footer > div:last-child { width: 100%; flex-direction: column; }
-            .form-footer > div:last-child button { width: 100%; }
-            
-            .history-grid { grid-template-columns: 1fr; }
-            
-            /* Tối ưu Bục Vinh Quang (Podium) trên Mobile để không bị tràn */
-            .boards-container { gap: 15px; flex-direction: column; }
-            .board-half { width: 100%; min-width: 0; padding: 15px; }
-            .podium-container { min-height: 120px; margin-top: 35px; gap: 5px; }
-            .podium-box { width: 32%; }
-            .podium-1, .podium-bot-1, .podium-water-1 { height: 120px; }
-            .podium-2, .podium-bot-2, .podium-3, .podium-bot-3, .podium-water-2, .podium-water-3 { height: 90px; }
-            .podium-avatar { width: 40px; height: 40px; margin: -30px auto 5px auto; font-size: 16px; border-width: 2px; }
-            .podium-score { font-size: 16px; margin: auto 5px 10px 5px; padding: 2px 0; }
-            .podium-name { font-size: 11px; }
-
-            .stat-card { flex-direction: column; text-align: center; }
-            .stat-avatar { width: 120px; height: 120px; border-radius: 50%; }
-            .stat-details-grid { grid-template-columns: repeat(2, 1fr); width: 100%;}
-        }
-        
-        #loading { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(5px); z-index: 9999; justify-content: center; align-items: center; font-size: 20px; font-weight: bold; color: #fff; flex-direction: column; gap: 15px;}
-        .dashboard-date { font-size: 14px; font-weight: normal; color: var(--text-muted); font-style: italic; display: block; margin-top: 8px;}
-
-        /* MODAL 3D */
-        .stats-modal { display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); backdrop-filter: blur(8px); justify-content: center; align-items: center; }
-        .modal-content-wrapper { position: relative; background: var(--bg-panel); padding: 30px; border-radius: 30px; max-width: 90%; width: 450px; text-align: center; box-shadow: var(--shadow-outer); border: 1px solid var(--border-color); }
-        .modal-content-wrapper .stat-card { flex-direction: column; width: 100%; box-shadow: none; border: none; padding: 0; background: transparent;}
-        .modal-content-wrapper .stat-avatar { width: 180px; height: 240px; margin-bottom: 20px; font-size: 70px; border-radius: 20px;}
-        .modal-content-wrapper .stat-name { font-size: 28px; margin-bottom: 25px; }
-        .close-modal { position: absolute; top: -50px; right: 0; color: white; font-size: 35px; cursor: pointer; text-shadow: 0 2px 5px rgba(0,0,0,0.5);}
-        .stat-avatar-hq { display: none; }
-	* { box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-body); color: var(--text-main); margin: 0; padding: 15px; transition: all 0.3s ease; overflow-x: hidden; }
-        .container { max-width: 900px; margin: 0 auto; position: relative; width: 100%; }
-	#app_screen, #login_screen, #superadmin_screen { display: none; }
-
-/* =========================================
-   CUSTOM AUTOCOMPLETE DROPDOWN (FIX UX MOBILE)
-   ========================================= */
-.custom-autocomplete-container {
-    position: relative;
-    width: 100%;
-}
-.custom-autocomplete-box {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    width: 100%;
-    max-height: 180px;
-    overflow-y: auto;
-    background: var(--bg-panel);
-    border: 1px solid var(--primary);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-    border-radius: 12px;
-    z-index: 9999;
-    margin-top: -10px;
-    display: none;
-}
-.custom-suggestion-item {
-    padding: 12px 15px;
-    cursor: pointer;
-    font-size: 15px;
-    font-weight: bold;
-    color: var(--text-main);
-    border-bottom: 1px solid var(--border-color);
-    transition: 0.2s;
-}
-.custom-suggestion-item:last-child {
-    border-bottom: none;
-}
-.custom-suggestion-item:active,
-.custom-suggestion-item:hover {
-    background: rgba(79, 172, 254, 0.1);
-    color: var(--primary);
-}
-
-/* =========================================
-   HIỆU ỨNG TOP 1 2 3 & BOT 1 2 3
-   ========================================= */
-/* Hiệu ứng Vàng cho Top 1 */
-@keyframes goldGlow { 
-    0% { box-shadow: inset 0 0 5px rgba(241,196,15,0.1); } 
-    50% { box-shadow: inset 0 0 20px rgba(241,196,15,0.5); background: rgba(241, 196, 15, 0.1); } 
-    100% { box-shadow: inset 0 0 5px rgba(241,196,15,0.1); } 
-}
-
-/* Hiệu ứng Bạc cho Top 2 */
-@keyframes silverGlow {
-    0% { box-shadow: inset 0 0 5px rgba(189,195,199,0.1); }
-    50% { box-shadow: inset 0 0 15px rgba(189,195,199,0.4); background: rgba(189,195,199,0.1); }
-    100% { box-shadow: inset 0 0 5px rgba(189,195,199,0.1); }
-}
-
-/* Hiệu ứng Đồng cho Top 3 */
-@keyframes bronzeGlow {
-    0% { box-shadow: inset 0 0 5px rgba(230,126,34,0.1); }
-    50% { box-shadow: inset 0 0 15px rgba(230,126,34,0.4); background: rgba(230,126,34,0.1); }
-    100% { box-shadow: inset 0 0 5px rgba(230,126,34,0.1); }
-}
-
-/* Hiệu ứng Đỏ đậm cho Bot 1 */
-@keyframes redPulse { 
-    0% { box-shadow: inset 0 0 5px rgba(231,76,60,0.1); } 
-    50% { box-shadow: inset 0 0 20px rgba(231,76,60,0.5); background: rgba(231, 76, 60, 0.1); } 
-    100% { box-shadow: inset 0 0 5px rgba(231,76,60,0.1); } 
-}
-
-/* Hiệu ứng Đỏ nhạt hơn cho Bot 2 & 3 */
-@keyframes softRedPulse {
-    0% { box-shadow: inset 0 0 5px rgba(231,76,60,0.05); }
-    50% { box-shadow: inset 0 0 10px rgba(231,76,60,0.3); background: rgba(231,76,60,0.05); }
-    100% { box-shadow: inset 0 0 5px rgba(231,76,60,0.05); }
-}
-
-/* --- ÁP DỤNG CLASS --- */
-.row-top1 td { animation: goldGlow 2s infinite alternate; border-top: 1px solid rgba(241,196,15,0.5); border-bottom: 1px solid rgba(241,196,15,0.5); }
-.row-top2 td { animation: silverGlow 2.5s infinite alternate; border-top: 1px solid rgba(189,195,199,0.4); border-bottom: 1px solid rgba(189,195,199,0.4); }
-.row-top3 td { animation: bronzeGlow 3s infinite alternate; border-top: 1px solid rgba(230,126,34,0.4); border-bottom: 1px solid rgba(230,126,34,0.4); }
-
-.row-bot1 td { animation: redPulse 2s infinite alternate; border-top: 1px solid rgba(231,76,60,0.5); border-bottom: 1px solid rgba(231,76,60,0.5); }
-.row-bot2 td { animation: softRedPulse 2.5s infinite alternate; border-top: 1px solid rgba(231,76,60,0.3); border-bottom: 1px solid rgba(231,76,60,0.3); }
-.row-bot3 td { animation: softRedPulse 3s infinite alternate; border-top: 1px solid rgba(231,76,60,0.2); border-bottom: 1px solid rgba(231,76,60,0.2); }
-/* =========================================
-   WINSTREAK / LOSESTREAK / BADGES
-   ========================================= */
-.streak-badge { font-size: 11px; padding: 2px 6px; border-radius: 8px; margin-left: 5px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
-.streak-win { background: rgba(230, 126, 34, 0.2); color: #f39c12; border: 1px solid #f39c12; text-shadow: 0 0 5px #f39c12; }
-.streak-lose { background: rgba(52, 152, 219, 0.2); color: #4facfe; border: 1px solid #4facfe; text-shadow: 0 0 5px #4facfe; }
-
-#h2h_result { font-size: 12px; font-weight: 900; text-align: center; margin-top: 10px; color: var(--primary); background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 8px; border: 1px dashed var(--primary); display: none; }
-
-/* =========================================
-           THẺ BÀI FUT 3D & RADAR CHART
-           ========================================= */
-        .card-container { perspective: 1000px; display: flex; justify-content: center; margin-bottom: 10px;}
-        .fut-card { width: 300px; height: 480px; background: var(--bg-panel); border-radius: 20px; position: relative; box-shadow: 0 20px 50px rgba(0,0,0,0.8), inset 0 0 0 2px rgba(255,215,0,0.3); transition: transform 0.5s ease; transform-style: preserve-3d; border: 2px solid rgba(255,215,0,0.2); overflow: hidden; }
-        .fut-card::after { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: linear-gradient(45deg, rgba(255,255,255,0) 40%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 60%); transform: rotate(45deg); opacity: 0; transition: 0.5s; pointer-events: none; z-index: 10; }
-        .fut-card:hover::after { opacity: 1; transform: rotate(45deg) translateY(50%); }
-        .card-rating { position: absolute; top: 20px; left: 15px; text-align: center; z-index: 2; }
-        /* Thêm định dạng cho nhãn Overall */
-.card-rating .label {
-    font-size: 8px;
-    font-weight: 900;
-    color: #f1c40f;
-    text-transform: uppercase;
-    margin-bottom: -2px;
-    display: block;
-    letter-spacing: 0.5px;
-}
-        .card-rating .pos { font-size: 13px; font-weight: bold; color: #f1c40f; border-bottom: 2px solid #f1c40f; padding-bottom: 2px; margin-bottom: 5px;}
-        .card-avatar-fut { width: 100%; height: 200px; display: flex; justify-content: center; align-items: flex-end; background: radial-gradient(circle at center, rgba(255,255,255,0.1) 0%, transparent 70%); }
-        .card-avatar-fut img { height: 180px; object-fit: cover; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.8)); border-radius: 10px;}
-        .card-name-fut { text-align: center; font-size: 22px; font-weight: 900; text-transform: uppercase; margin: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px; width: 80%; margin-left: auto; margin-right: auto; color: #fff; }
-        .card-radar { width: 100%; height: 150px; position: relative; z-index: 2; display: flex; justify-content: center;}
-        .card-stats-fut { display: flex; justify-content: space-between; padding: 10px 25px; font-size: 13px; font-weight: bold; color: #ddd; }
-        .stat-col { display: flex; flex-direction: column; gap: 5px; }
-        .stat-item { display: flex; gap: 5px; align-items: center;}
-        .stat-val { font-size: 15px; font-weight: 900; color: #fff; min-width: 45px; text-align: left; }
-
-        /* CLASS ĐỔI MÀU THẺ */
-        .card-red { background: linear-gradient(135deg, #c0392b, #8e44ad); border-color: #ff4757;}
-        .card-gold { background: linear-gradient(135deg, #d4af37, #8a6d3b); border-color: #f1c40f;}
-        .card-silver { background: linear-gradient(135deg, #bdc3c7, #7f8c8d); border-color: #fff;}
-        .card-bronze { background: linear-gradient(135deg, #cd7f32, #8b5a2b); border-color: #e67e22;}
-        .card-vip { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); border-color: #00f2fe;}
-
-
-    </style>
+    <!-- LIÊN KẾT FILE CSS TÁCH RIÊNG -->
+    <link rel="stylesheet" href="style.css">
 </head>
 <body class="dark-mode">
 
@@ -862,7 +442,6 @@ if (!$conn->connect_error) {
 </div>
 
 <div id="app_screen" class="container">
-    
     <div class="banner-container">
         <img id="main_banner_img" src="logo.png" alt="Banner Main" class="banner-main" onerror="this.src='https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?auto=format&fit=crop&w=1200&q=80'">
         <button id="banner_upload_overlay" class="admin-only btn-primary" style="display:none; position: absolute; top: 15px; right: 15px; z-index: 10; padding: 10px 20px; border-radius: 12px; font-weight: 900; cursor: pointer; align-items: center; justify-content: center; gap: 8px;" onclick="document.getElementById('banner_file_input').click()">📷 Đổi Ảnh Bìa</button>
@@ -887,26 +466,24 @@ if (!$conn->connect_error) {
         </div>
         
         <div class="nav-tabs" style="margin-bottom:0; margin-top: 20px;">
-    <button class="tab-btn active" onclick="switchTab('main')">📊 Tổng Quan</button>
-    <button class="tab-btn" onclick="switchTab('stats')">📈 Thống Kê</button>
-    <button class="tab-btn" onclick="switchTab('monthly')">📅 Tổng Kết Tháng</button> 
-          </div>
+            <button class="tab-btn active" onclick="switchTab('main')">📊 Tổng Quan</button>
+            <button class="tab-btn" onclick="switchTab('stats')">📈 Thống Kê</button>
+            <button class="tab-btn" onclick="switchTab('monthly')">📅 Tổng Kết Tháng</button> 
+        </div>
 
-    <div id="tab_main" class="tab-pane active">
-        <div class="section admin-only">
-            <h2 id="form_title" style="text-align: center; color: var(--primary); font-weight: 900; font-size: 24px; margin-top: 0;">Thêm Trận Đấu Mới</h2>
-            <input type="hidden" id="edit_match_id" value="">
-            
-            <div class="match-date-input-container">
-                <label style="font-weight: 900; font-size: 15px; color: var(--primary);">📅 Ngày diễn ra:</label>
-                <input type="date" id="match_date_input" style="width: auto; margin-bottom:0; padding: 10px 20px;">
+        <div id="tab_main" class="tab-pane active">
+            <div class="section admin-only">
+                <h2 id="form_title" style="text-align: center; color: var(--primary); font-weight: 900; font-size: 24px; margin-top: 0;">Thêm Trận Đấu Mới</h2>
+                <input type="hidden" id="edit_match_id" value="">
+                
+                <div class="match-date-input-container">
+                    <label style="font-weight: 900; font-size: 15px; color: var(--primary);">📅 Ngày diễn ra:</label>
+                    <input type="date" id="match_date_input" style="width: auto; margin-bottom:0; padding: 10px 20px;">
+                </div>
             </div>
-</div>
 
             <div style="display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 20px; margin-bottom: 25px; background: var(--bg-input); padding: 15px; border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-inner);">
-                <div style="font-weight: 900; font-size: 15px; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
-                    🏸 Nội dung:
-                </div>
+                <div style="font-weight: 900; font-size: 15px; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">🏸 Nội dung:</div>
                 <label style="cursor: pointer; display: flex; align-items: center; gap: 10px; margin: 0; font-weight: bold;">
                     <input type="radio" name="match_type" value="doi" checked onchange="toggleMatchType()" style="margin: 0; width: 20px; height: 20px; cursor: pointer; box-shadow:none;"> 
                     <span>Đôi (2vs2)</span>
@@ -918,44 +495,35 @@ if (!$conn->connect_error) {
             </div>
 
             <div class="match-form">
-    <div class="team-box" id="box_team1">
-        <h3>ĐỘI 1</h3>
-        <div class="custom-autocomplete-container">
-    <input type="text" id="t1_p1" placeholder="Người chơi 1" autocomplete="off">
-</div>
-<div class="custom-autocomplete-container">
-    <input type="text" id="t1_p2" placeholder="Người chơi 2" autocomplete="off">
-</div>
-        <div class="winner-selector">
-            <label><input type="radio" name="manual_winner" value="team1" onchange="highlightManualWinner()"><span>🏆 Chọn Thắng</span></label>
-        </div>
-    </div>
-    
-    <div class="center-col" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; z-index: 10;">
-        <div style="background: var(--bg-input); padding: 10px; border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-inner); text-align: center; width: 100%;">
-            <label style="font-size: 11px; color: var(--text-muted); font-weight: 900; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 5px;">Tỉ Số</label>
-            <input type="text" id="match_score_input" placeholder="(Không bắt buộc)" oninput="autoHighlightWinner()" style="width: 100%; box-sizing: border-box; padding: 10px 5px; text-align: center; font-weight: 900; font-size: 14px; letter-spacing: 1px; margin: 0; box-shadow: none; background: var(--bg-panel); color: var(--success); border: 1px solid var(--border-color); border-radius: 10px;">
-        </div>
-        <div class="vs-badge" style="width: 45px; height: 45px; font-size: 16px; margin: 0;">VS</div>
-	<button class="btn-info" type="button" onclick="autoMatchmake()" style="padding: 6px 12px; font-size: 11px; margin-bottom: 10px; box-shadow: var(--shadow-outer); border-radius: 8px;">⚖️ Xếp Kèo Tự Động</button>
-	<div id="h2h_result"></div>
-    
-    <button class="btn-danger" type="button" id="btn_voice_input" style="padding: 10px 12px; font-size: 13px; margin-bottom: 10px; box-shadow: var(--shadow-outer); border-radius: 8px; transition: 0.2s; width: 100%; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation;">🎤 Nhấn Giữ Để Nói</button>
-    </div>
-    
-    <div class="team-box" id="box_team2">
-        <h3 style="color: var(--text-muted);">ĐỘI 2</h3>
-        <div class="custom-autocomplete-container">
-    <input type="text" id="t2_p1" placeholder="Người chơi 1" autocomplete="off">
-</div>
-<div class="custom-autocomplete-container">
-    <input type="text" id="t2_p2" placeholder="Người chơi 2" autocomplete="off">
-</div>
-        <div class="winner-selector">
-            <label><input type="radio" name="manual_winner" value="team2" onchange="highlightManualWinner()"><span>🏆 Chọn Thắng</span></label>
-        </div>
-    </div>
-</div>
+                <div class="team-box" id="box_team1">
+                    <h3>ĐỘI 1</h3>
+                    <div class="custom-autocomplete-container"><input type="text" id="t1_p1" placeholder="Người chơi 1" autocomplete="off"></div>
+                    <div class="custom-autocomplete-container"><input type="text" id="t1_p2" placeholder="Người chơi 2" autocomplete="off"></div>
+                    <div class="winner-selector">
+                        <label><input type="radio" name="manual_winner" value="team1" onchange="highlightManualWinner()"><span>🏆 Chọn Thắng</span></label>
+                    </div>
+                </div>
+                
+                <div class="center-col" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; z-index: 10;">
+                    <div style="background: var(--bg-input); padding: 10px; border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-inner); text-align: center; width: 100%;">
+                        <label style="font-size: 11px; color: var(--text-muted); font-weight: 900; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 5px;">Tỉ Số</label>
+                        <input type="text" id="match_score_input" placeholder="(Không bắt buộc)" oninput="autoHighlightWinner()" style="width: 100%; box-sizing: border-box; padding: 10px 5px; text-align: center; font-weight: 900; font-size: 14px; letter-spacing: 1px; margin: 0; box-shadow: none; background: var(--bg-panel); color: var(--success); border: 1px solid var(--border-color); border-radius: 10px;">
+                    </div>
+                    <div class="vs-badge" style="width: 45px; height: 45px; font-size: 16px; margin: 0;">VS</div>
+                    <button class="btn-info" type="button" onclick="autoMatchmake()" style="padding: 6px 12px; font-size: 11px; margin-bottom: 10px; box-shadow: var(--shadow-outer); border-radius: 8px;">⚖️ Xếp Kèo Tự Động</button>
+                    <div id="h2h_result"></div>
+                    <button class="btn-danger" type="button" id="btn_voice_input" style="padding: 10px 12px; font-size: 13px; margin-bottom: 10px; box-shadow: var(--shadow-outer); border-radius: 8px; transition: 0.2s; width: 100%; user-select: none;">🎤 Nhấn Giữ Để Nói</button>
+                </div>
+                
+                <div class="team-box" id="box_team2">
+                    <h3 style="color: var(--text-muted);">ĐỘI 2</h3>
+                    <div class="custom-autocomplete-container"><input type="text" id="t2_p1" placeholder="Người chơi 1" autocomplete="off"></div>
+                    <div class="custom-autocomplete-container"><input type="text" id="t2_p2" placeholder="Người chơi 2" autocomplete="off"></div>
+                    <div class="winner-selector">
+                        <label><input type="radio" name="manual_winner" value="team2" onchange="highlightManualWinner()"><span>🏆 Chọn Thắng</span></label>
+                    </div>
+                </div>
+            </div>
 
             <div class="form-footer" style="display: flex; flex-direction: column; gap: 20px;">
                 <div style="display: flex; flex-wrap: wrap; gap: 15px; width: 100%;">
@@ -975,106 +543,104 @@ if (!$conn->connect_error) {
                 </div>
             </div>
                 
-               
-        <div class="section" id="capture_area">
-            <div class="dashboard-header-flex" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: var(--primary); font-weight: 900;">📊 Bảng Phong Thần <br><span id="dashboard_date_display" class="dashboard-date"></span></h2>
-                <button class="btn-info" onclick="captureDashboard()">📸 Chụp Bảng Điểm</button>
+            <div class="section" id="capture_area">
+                <div class="dashboard-header-flex" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 style="margin: 0; color: var(--primary); font-weight: 900;">📊 Bảng Phong Thần <br><span id="dashboard_date_display" class="dashboard-date"></span></h2>
+                    <button class="btn-info" onclick="captureDashboard()">📸 Chụp Bảng Điểm</button>
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead><tr><th>STT</th><th>Tên</th><th>Trận</th><th>T</th><th>B</th><th>Nước</th><th>H.Số</th><th>Điểm</th><th>% Thắng</th></tr></thead>
+                        <tbody id="dashboard_body"></tbody>
+                    </table>
+                </div>
             </div>
-            <div class="table-responsive">
-                <table>
-                    <thead><tr><th>STT</th><th>Tên</th><th>Trận</th><th>T</th><th>B</th><th>Nước</th><th>H.Số</th><th>Điểm</th><th>% Thắng</th></tr></thead>
-                    <tbody id="dashboard_body"></tbody>
-                </table>
+
+            <div class="section" id="capture_history_area">
+                <div class="dashboard-header-flex" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 style="margin: 0; color: var(--primary); font-weight: 900;">📜 Lịch Sử Trận Đấu <br><span id="history_date_display" class="dashboard-date"></span></h2>
+                    <button class="btn-info" onclick="captureHistory()">📸 Chụp Lịch Sử</button>
+                </div>
+                
+                <div id="history_pagination" style="display: none; justify-content: center; align-items: center; gap: 20px; margin: 20px 0; background: var(--bg-input); padding: 15px; border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-inner);">
+                    <button class="btn-primary" id="btn_prev_date" onclick="changeHistoryDate(1)">⬅️ Ngày cũ</button>
+                    <span id="current_history_date_label" style="font-weight: 900; color: var(--text-main); font-size: 16px;"></span>
+                    <button class="btn-primary" id="btn_next_date" onclick="changeHistoryDate(-1)">Ngày mới ➡️</button>
+                </div>
+
+                <div class="history-grid" id="history_grid"></div>
+            </div>
+
+            <div class="section" style="background: transparent; box-shadow: none; padding: 0; border: none;">
+                <div class="boards-container">
+                    <div class="board-half"><h3 style="color: #f1c40f;">🏆 Top 3 Lông Thủ</h3><div class="podium-container" id="top3_podium"></div></div>
+                    <div class="board-half"><h3 style="color: #e74c3c;">🐆 Top 3 Báo Thủ</h3><div class="podium-container" id="bottom3_podium"></div></div>
+                    <div class="board-half"><h3 style="color: #3498db;">🥤 Top 3 Thần Nước</h3><div class="podium-container" id="water3_podium"></div></div>
+                </div>
             </div>
         </div>
 
-        <div class="section" id="capture_history_area">
-            <div class="dashboard-header-flex" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: var(--primary); font-weight: 900;">📜 Lịch Sử Trận Đấu <br><span id="history_date_display" class="dashboard-date"></span></h2>
-                <button class="btn-info" onclick="captureHistory()">📸 Chụp Lịch Sử</button>
+        <div id="tab_stats" class="tab-pane">
+            <div class="section">
+                <h2 style="margin: 0; color: var(--primary); font-weight: 900;">📈 Thống Kê Chi Tiết 3D <span id="stats_date_display" class="dashboard-date"></span></h2>
+                <p style="font-size: 14px; color: var(--text-muted); margin-top: 8px;">(Admin: Chạm vào vòng tròn để thay Avatar)</p>
+                <div class="stats-grid-container" id="stats_container"></div>
             </div>
-            
-            <div id="history_pagination" style="display: none; justify-content: center; align-items: center; gap: 20px; margin: 20px 0; background: var(--bg-input); padding: 15px; border-radius: 16px; border: 1px solid var(--border-color); box-shadow: var(--shadow-inner);">
-                <button class="btn-primary" id="btn_prev_date" onclick="changeHistoryDate(1)">⬅️ Ngày cũ</button>
-                <span id="current_history_date_label" style="font-weight: 900; color: var(--text-main); font-size: 16px;"></span>
-                <button class="btn-primary" id="btn_next_date" onclick="changeHistoryDate(-1)">Ngày mới ➡️</button>
-            </div>
-
-            <div class="history-grid" id="history_grid"></div>
         </div>
 
-        <div class="section" style="background: transparent; box-shadow: none; padding: 0; border: none;">
-            <div class="boards-container">
-                <div class="board-half"><h3 style="color: #f1c40f;">🏆 Top 3 Lông Thủ</h3><div class="podium-container" id="top3_podium"></div></div>
-                <div class="board-half"><h3 style="color: #e74c3c;">🐆 Top 3 Báo Thủ</h3><div class="podium-container" id="bottom3_podium"></div></div>
-                <div class="board-half"><h3 style="color: #3498db;">🥤 Top 3 Thần Nước</h3><div class="podium-container" id="water3_podium"></div></div>
+        <div id="tab_monthly" class="tab-pane">
+            <div class="section">
+                <h2 style="margin: 0; color: var(--primary); font-weight: 900;">📅 Báo Cáo Tổng Kết Tháng</h2>
+                <div class="filter-bar" style="margin-top: 15px; display: flex; gap: 10px;">
+                    <select id="report_month" class="btn-outline" style="flex: 1; padding: 12px; border-radius: 12px; background: var(--bg-input); color: var(--text-main);"></select>
+                    <select id="report_year" class="btn-outline" style="flex: 1; padding: 12px; border-radius: 12px; background: var(--bg-input); color: var(--text-main);"></select>
+                    <button class="btn-primary" onclick="generateMonthlyReport()" style="flex: 1;">Xem Báo Cáo</button>
+                </div>
+            </div>
+
+            <div id="monthly_report_content" style="display: none;">
+                <div class="section" id="capture_monthly_area">
+                    <div class="dashboard-header-flex" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 style="margin: 0; color: var(--primary); font-weight: 900;">🏆 Bảng Vàng Tháng <br><span id="monthly_label" class="dashboard-date"></span></h2>
+                        <button class="btn-info" onclick="captureMonthlyReport()">📸 Chụp Báo Cáo</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table>
+                            <thead><tr><th>STT</th><th>Tên</th><th>Trận</th><th>T</th><th>B</th><th>Nước</th><th>H.Số</th><th>Điểm</th></tr></thead>
+                            <tbody id="monthly_dashboard_body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2 style="margin: 0; color: var(--primary); font-weight: 900; margin-bottom: 20px;">📈 Thống Kê Chi Tiết Tháng</h2>
+                    <div class="stats-grid-container" id="monthly_stats_container"></div>
+                </div>
+                
+                <p style="text-align: center; margin-top: 15px; font-size: 12px; color: var(--text-muted); font-style: italic;">Dữ liệu được tổng kết tự động bởi Badminton Battle 3D</p>
             </div>
         </div>
     </div>
-
-    <div id="tab_stats" class="tab-pane">
-        <div class="section">
-            <h2 style="margin: 0; color: var(--primary); font-weight: 900;">📈 Thống Kê Chi Tiết 3D <span id="stats_date_display" class="dashboard-date"></span></h2>
-            <p style="font-size: 14px; color: var(--text-muted); margin-top: 8px;">(Admin: Chạm vào vòng tròn để thay Avatar)</p>
-            <div class="stats-grid-container" id="stats_container"></div>
-        </div>
-    </div>
-
-	<div id="tab_monthly" class="tab-pane">
-    <div class="section">
-        <h2 style="margin: 0; color: var(--primary); font-weight: 900;">📅 Báo Cáo Tổng Kết Tháng</h2>
-        <div class="filter-bar" style="margin-top: 15px; display: flex; gap: 10px;">
-            <select id="report_month" class="btn-outline" style="flex: 1; padding: 12px; border-radius: 12px; background: var(--bg-input); color: var(--text-main);"></select>
-            <select id="report_year" class="btn-outline" style="flex: 1; padding: 12px; border-radius: 12px; background: var(--bg-input); color: var(--text-main);"></select>
-            <button class="btn-primary" onclick="generateMonthlyReport()" style="flex: 1;">Xem Báo Cáo</button>
-        </div>
-    </div>
-
-    <div id="monthly_report_content" style="display: none;">
-        <div class="section" id="capture_monthly_area">
-            <div class="dashboard-header-flex" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: var(--primary); font-weight: 900;">🏆 Bảng Vàng Tháng <br><span id="monthly_label" class="dashboard-date"></span></h2>
-                <button class="btn-info" onclick="captureMonthlyReport()">📸 Chụp Báo Cáo</button>
-            </div>
-            <div class="table-responsive">
-                <table>
-                    <thead><tr><th>STT</th><th>Tên</th><th>Trận</th><th>T</th><th>B</th><th>Nước</th><th>H.Số</th><th>Điểm</th></tr></thead>
-                    <tbody id="monthly_dashboard_body"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2 style="margin: 0; color: var(--primary); font-weight: 900; margin-bottom: 20px;">📈 Thống Kê Chi Tiết Tháng</h2>
-            <div class="stats-grid-container" id="monthly_stats_container"></div>
-        </div>
-        
-        <p style="text-align: center; margin-top: 15px; font-size: 12px; color: var(--text-muted); font-style: italic;">Dữ liệu được tổng kết tự động bởi Badminton Battle 3D</p>
-    </div>
-</div>
 
     <div class="section" style="text-align: center; padding: 25px 15px; margin-top: 30px; font-size: 14px; color: var(--text-muted);">
         <div style="font-weight: 900; font-size: 20px; color: var(--primary); margin-bottom: 8px;">🏆 Badminton Battle 3D v1.0</div>
         <div style="margin-bottom: 15px;">Hệ thống ghi điểm & quản lý cầu lông nội bộ</div>
 
         <div style="display: flex; justify-content: center; align-items: stretch; gap: 20px; flex-wrap: wrap; margin-bottom: 20px; max-width: 100%;">
-            
             <div style="background: var(--bg-input); padding: 15px; border-radius: 12px; border: 1px solid var(--border-color); text-align: left; box-shadow: var(--shadow-inner); flex: 1; min-width: 250px;">
                 <div style="margin-bottom: 8px;">📞 <strong>Hỗ trợ & Gia hạn:</strong> <a href="https://zalo.me/0938844865" target="_blank" style="color: var(--success); text-decoration: none; font-weight: bold;">0938.844.865 (Zalo)</a></div>
                 <div style="margin-bottom: 8px;">✉️ <strong>Báo lỗi & Góp ý:</strong> <a href="mailto:Badmintonbattle@gmail.com" style="color: var(--primary); text-decoration: none;">Badmintonbattle@gmail.com</a></div>
                 <div>🌐 <strong>Cộng đồng:</strong> <span style="color: var(--secondary); font-weight: bold;">Facebook page: Update soon.</span></div>
             </div>
 
-            <div style="background: var(--bg-input); padding: 15px; border-radius: 12px; border: 1px dashed #c61a7e; text-align: left; box-shadow: var(--shadow-inner); flex: 1; min-width: 250px; display: flex; align-items: center; justify-content: space-between; gap: 15px; transition: 0.3s;" onmouseover="this.style.borderColor='#ff4757'; this.style.boxShadow='var(--shadow-outer)'" onmouseout="this.style.borderColor='#c61a7e'; this.style.boxShadow='var(--shadow-inner)'">
+            <div style="background: var(--bg-input); padding: 15px; border-radius: 12px; border: 1px dashed #c61a7e; text-align: left; box-shadow: var(--shadow-inner); flex: 1; min-width: 250px; display: flex; align-items: center; justify-content: space-between; gap: 15px; transition: 0.3s;">
                 <div>
                     <div style="font-weight: 900; color: #c61a7e; font-size: 15px; margin-bottom: 5px; text-transform: uppercase;">☕ Tiếp Lửa Admin</div>
                     <div style="font-size: 12px; color: var(--text-muted); line-height: 1.4; margin-bottom: 8px;">Ủng hộ ly trà đá để duy trì máy chủ chạy mượt mà hơn nhé!</div>
-                    <div style="font-size: 15px; font-weight: 900; color: var(--text-main);"><img src="https://upload.wikimedia.org/wikipedia/vi/f/fe/MoMo_Logo.png" alt="MoMo" style="height: 16px; vertical-align: middle; margin-right: 5px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));"> 0327.840.068</div>
+                    <div style="font-size: 15px; font-weight: 900; color: var(--text-main);"><img src="https://upload.wikimedia.org/wikipedia/vi/f/fe/MoMo_Logo.png" alt="MoMo" style="height: 16px; vertical-align: middle; margin-right: 5px;"> 0327.840.068</div>
                 </div>
                 <img src="Screenshot_13.png" alt="QR MoMo" style="width: 110px; height: 110px; border-radius: 8px; object-fit: contain; background: #fff; padding: 3px; border: 1px solid rgba(0,0,0,0.1); box-shadow: var(--shadow-outer); flex-shrink: 0;">
             </div>
-            
         </div>
 
         <div style="font-size: 12px; margin-bottom: 15px; line-height: 1.6; padding: 0 10px; opacity: 0.8;">
@@ -1086,1803 +652,55 @@ if (!$conn->connect_error) {
         </div>
     </div> 
 
-<div id="stats_modal" class="stats-modal">
-    <div class="modal-content-wrapper" style="background: transparent; border: none; box-shadow: none;">
-        <span class="close-modal" onclick="closeStatsModal()" style="top: -20px; right: 10px;">&times;</span>
-        <div id="capture_card_area">
-            <div class="card-container">
-                <div class="fut-card card-silver" id="player_fut_card">
-                    <div class="card-rating">
-    <span class="label">Overall</span> <div class="ovr" id="fut_ovr">0</div>
-    <div class="pos" id="fut_pos">POS</div>
-    <div class="country">🏸</div>
-</div>
-                    <div class="card-avatar-fut" id="fut_avatar"></div>
-                    <div class="card-name-fut" id="fut_name">NAME</div>
-                    
-                    <div class="card-radar">
-                        <div style="width: 220px; height: 100%;"><canvas id="radarChart"></canvas></div>
-                    </div>
-
-                    <div class="card-stats-fut">
-                        <div class="stat-col">
-                            <div class="stat-item" title="Số trận đã thi đấu"><span class="stat-val" id="fut_match">0</span> TRẬN</div>
-                            <div class="stat-item" title="Tỉ lệ chiến thắng"><span class="stat-val" id="fut_winrate">0</span> % THẮNG</div>
-                            <div class="stat-item" title="Số trận Thắng / Thua"><span class="stat-val" id="fut_wl">0/0</span> T/B</div>
+    <div id="stats_modal" class="stats-modal">
+        <div class="modal-content-wrapper" style="background: transparent; border: none; box-shadow: none;">
+            <span class="close-modal" onclick="closeStatsModal()" style="top: -20px; right: 10px;">&times;</span>
+            <div id="capture_card_area">
+                <div class="card-container">
+                    <div class="fut-card card-silver" id="player_fut_card">
+                        <div class="card-rating">
+                            <span class="label">Overall</span> <div class="ovr" id="fut_ovr">0</div>
+                            <div class="pos" id="fut_pos">POS</div>
+                            <div class="country">🏸</div>
                         </div>
-                        <div class="stat-col">
-                            <div class="stat-item" title="Tổng điểm cược"><span class="stat-val" id="fut_point">0</span> ĐIỂM</div>
-                            <div class="stat-item" title="Tổng độ nước"><span class="stat-val" id="fut_water">0</span> NƯỚC</div>
-                            <div class="stat-item" title="Hiệu số điểm các set"><span class="stat-val" id="fut_h">0</span> H.SỐ</div>
+                        <div class="card-avatar-fut" id="fut_avatar"></div>
+                        <div class="card-name-fut" id="fut_name">NAME</div>
+                        
+                        <div class="card-radar">
+                            <div style="width: 220px; height: 100%;"><canvas id="radarChart"></canvas></div>
+                        </div>
+
+                        <div class="card-stats-fut">
+                            <div class="stat-col">
+                                <div class="stat-item" title="Số trận đã thi đấu"><span class="stat-val" id="fut_match">0</span> TRẬN</div>
+                                <div class="stat-item" title="Tỉ lệ chiến thắng"><span class="stat-val" id="fut_winrate">0</span> % THẮNG</div>
+                                <div class="stat-item" title="Số trận Thắng / Thua"><span class="stat-val" id="fut_wl">0/0</span> T/B</div>
+                            </div>
+                            <div class="stat-col">
+                                <div class="stat-item" title="Tổng điểm cược"><span class="stat-val" id="fut_point">0</span> ĐIỂM</div>
+                                <div class="stat-item" title="Tổng độ nước"><span class="stat-val" id="fut_water">0</span> NƯỚC</div>
+                                <div class="stat-item" title="Hiệu số điểm các set"><span class="stat-val" id="fut_h">0</span> H.SỐ</div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
+            <button class="btn-success" onclick="downloadSingleCard()" style="margin-top: 15px; width: 100%; padding: 15px; font-size: 16px; border-radius: 12px; font-weight: bold;">📥 Tải Ảnh Thẻ Về Máy</button>
         </div>
-        <button class="btn-success" onclick="downloadSingleCard()" style="margin-top: 15px; width: 100%; padding: 15px; font-size: 16px; border-radius: 12px; font-weight: bold;">📥 Tải Ảnh Thẻ Về Máy</button>
     </div>
-</div>
 
-<script>
-    let matches = []; 
-    let playerAvatars = {}; 
-    let userRole = '';
-    let currentDataString = ""; 
-    let currentAvatarPlayer = ""; 
-    let superAdminData = [];
-
-    // --- BIẾN MỚI CHO PHÂN TRANG LỊCH SỬ ---
-    let currentFilteredMatches = [];
-    let uniqueHistoryDates = [];
-    let currentHistoryDateIndex = 0;
-
-    // ==========================================
-    // LOGIC GIAO DIỆN SÁNG / TỐI (THEME)
-    // ==========================================
-    function applyTheme(isDark) {
-        const btns = document.querySelectorAll('.theme-btn');
-        if (isDark) {
-            document.body.classList.add('dark-mode');
-            btns.forEach(btn => btn.innerHTML = '☀️ Sáng 3D');
-        } else {
-            document.body.classList.remove('dark-mode');
-            btns.forEach(btn => btn.innerHTML = '🌙 Tối 3D');
-        }
-    }
-
-    // Hàm lấy ngày chuẩn theo múi giờ địa phương (Việt Nam)
-    function getTodayVN() {
-        const d = new Date();
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    }
-
-    function toggleTheme() {
-        const isDark = !document.body.classList.contains('dark-mode');
-        localStorage.setItem('betminton_theme', isDark ? 'dark' : 'light');
-        applyTheme(isDark);
-    }
-
-    // CHẠY KHI MỞ TRANG
-    window.onload = () => {
-        // Mặc định ép luôn vào Dark Mode vì giao diện 3D Premium Dark quá xịn
-        const savedTheme = localStorage.getItem('betminton_theme') || 'dark';
-        if (savedTheme === 'dark') applyTheme(true);
-        else applyTheme(false);
-
-        sendAPI({ action: 'check_auth' }, (res) => {
-            if (res.status === 'success') {
-                handleLoginSuccess(res.role, res.group_name, res.expire_date);
-            } else {
-                document.getElementById('login_screen').style.display = 'block';
-            }
-        });
-    };
-
-    function sendAPI(payload, callback, silent = false) {
-        if (!silent) document.getElementById('loading').style.display = 'flex';
-        fetch(window.location.href, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-        .then(res => res.json())
-        .then(data => { if (!silent) document.getElementById('loading').style.display = 'none'; if(callback) callback(data); })
-        .catch(err => { 
-            if (!silent) {
-                document.getElementById('loading').style.display = 'none';
-                alert("Đã xảy ra lỗi hệ thống! Vui lòng tải lại trang.");
-            }
-            console.error("Fetch API Error", err);
-        });
-    }
-
-    function login(type) {
-        const u = document.getElementById('login_user').value;
-        const p = document.getElementById('login_pass').value;
-        if(!u) { alert("Vui lòng nhập Tài khoản nhóm!"); return; }
-
-        if (type === 'guest') {
-            sendAPI({ action: 'guest_login', username: u }, res => {
-                if (res.status === 'success') handleLoginSuccess(res.role, res.group_name, res.expire_date);
-                else alert(res.message);
-            });
-        } else {
-            sendAPI({ action: 'login', username: u, password: p }, res => {
-                if (res.status === 'success') handleLoginSuccess(res.role, res.group_name, res.expire_date);
-                else alert(res.message);
-            });
-        }
-    }
-
-    // --- CHUYỂN ĐỔI UI ĐĂNG NHẬP / ĐĂNG KÝ ---
-    function toggleAuthView(view) {
-        if (view === 'register') {
-            document.getElementById('form_login_view').style.display = 'none';
-            document.getElementById('form_register_view').style.display = 'block';
-        } else {
-            document.getElementById('form_login_view').style.display = 'block';
-            document.getElementById('form_register_view').style.display = 'none';
-        }
-    }
-
-    // --- GỬI YÊU CẦU ĐĂNG KÝ ---
-    function registerNewGroup() {
-        const n = document.getElementById('reg_group_name').value;
-        const u = document.getElementById('reg_user').value;
-        const p = document.getElementById('reg_pass').value;
-
-        if(!n || !u || !p) { alert("Vui lòng điền đầy đủ thông tin!"); return; }
-        if(u.includes(' ')) { alert("ID Đăng nhập không được có khoảng trắng!"); return; }
-
-        sendAPI({ action: 'register_group', new_name: n, new_user: u, new_pass: p }, res => {
-            if (res.status === 'success') {
-                alert(res.message);
-                toggleAuthView('login');
-                document.getElementById('login_user').value = u;
-                document.getElementById('login_pass').value = '';
-            } else {
-                alert(res.message);
-            }
-        });
-    }
-
-    function handleLoginSuccess(role, groupName, expireDate) {
-        userRole = role;
-        document.getElementById('login_screen').style.display = 'none';
-        
-        if (role === 'superadmin') {
-            document.getElementById('superadmin_screen').style.display = 'block';
-            const futureDate = new Date(Date.now() + 30*24*60*60*1000);
-            document.getElementById('new_group_expire').value = futureDate.toISOString().split('T')[0];
-            fetchAccounts(); 
-        } else {
-            document.getElementById('app_screen').style.display = 'block';
-            
-            // GẮN CHỮ NGÀY HẾT HẠN VÀO TIÊU ĐỀ
-            let expHtml = '';
-            document.getElementById('app_title').innerHTML = "🏆 " + groupName + expHtml;
-            
-            document.getElementById('user_role_badge').innerText = role === 'admin' ? "👤 Admin Sân" : "👁️ Xem Khách";
-            
-            document.querySelectorAll('.admin-only').forEach(el => {
-                if(el.id === 'banner_upload_overlay') el.style.display = (role === 'admin') ? 'flex' : 'none';
-                else if(el.id === 'btn_change_pass') el.style.display = (role === 'admin') ? 'inline-block' : 'none';
-                else el.style.display = (role === 'admin') ? 'block' : 'none';
-            });
-            
-            const today = getTodayVN()
-            document.getElementById('date_from').value = today; document.getElementById('date_to').value = today; document.getElementById('match_date_input').value = today; 
-            
-            fetchDataFromServer(false); 
-            setInterval(() => { fetchDataFromServer(true); }, 5000); 
-        }
-    }
-
-	function initMonthlySelectors() {
-    const monthSelect = document.getElementById('report_month');
-    const yearSelect = document.getElementById('report_year');
-    const now = new Date();
-
-    const monthNames = ["Tháng 1", "Tháng 2", "Tháng 3", "Tháng 4", "Tháng 5", "Tháng 6", "Tháng 7", "Tháng 8", "Tháng 9", "Tháng 10", "Tháng 11", "Tháng 12"];
-    for (let i = 0; i < 12; i++) {
-        let opt = document.createElement('option');
-        opt.value = i + 1;
-        opt.innerHTML = monthNames[i];
-        if (i === now.getMonth()) opt.selected = true;
-        monthSelect.appendChild(opt);
-    }
-
-    for (let i = 2024; i <= 2030; i++) {
-        let opt = document.createElement('option');
-        opt.value = i;
-        opt.innerHTML = "Năm " + i;
-        if (i === now.getFullYear()) opt.selected = true;
-        yearSelect.appendChild(opt);
-    }
-}
-// Gọi khởi tạo
-initMonthlySelectors();
-
-function generateMonthlyReport() {
-    const month = parseInt(document.getElementById('report_month').value);
-    const year = parseInt(document.getElementById('report_year').value);
-    
-    const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
-    const lastDay = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
-    
-    document.getElementById('monthly_label').innerText = `Tháng ${month}/${year}`;
-    document.getElementById('monthly_report_content').style.display = 'block';
-
-    // 1. Lọc trận đấu trong tháng
-    const m_matches = matches.filter(m => m.date >= firstDay && m.date <= lastDay);
-    
-    let players = {};
-
-    m_matches.forEach(m => {
-        const team1 = Array.isArray(m.team1) ? m.team1.filter(Boolean) : [];
-        const team2 = Array.isArray(m.team2) ? m.team2.filter(Boolean) : [];
-        const isDub = (team1.length === 2 && team2.length === 2);
-        
-        [...team1, ...team2].forEach(p => { 
-            if(!players[p]) players[p] = { m: 0, w: 0, l: 0, p: 0, h: 0, water: 0, winPoints: 0, m_dub: 0, w_dub: 0 }; 
-            if(isDub) players[p].m_dub++;
-        });
-
-        const wT = m.winner === 'team1' ? team1 : team2;
-        const lT = m.winner === 'team1' ? team2 : team1;
-        
-        let t1_score = 0; let t2_score = 0;
-        if (m.score && String(m.score).trim() !== "") {
-            const pts = String(m.score).split('-');
-            if(pts.length >= 2) {
-                t1_score = parseInt(pts[0].trim()) || 0; t2_score = parseInt(pts[1].trim()) || 0;
-            }
-        }
-        team1.forEach(p => { players[p].h += (t1_score - t2_score); });
-        team2.forEach(p => { players[p].h += (t2_score - t1_score); });
-
-        wT.forEach(p => { 
-            players[p].m++; players[p].w++; players[p].p += m.bet; players[p].water += (m.water || 0); players[p].winPoints += m.bet;
-            if(isDub) players[p].w_dub++;
-        });
-        lT.forEach(p => { players[p].m++; players[p].l++; players[p].p -= m.bet; players[p].water -= (m.water || 0); });
-    });
-
-    // 2. Sắp xếp danh sách
-    const sorted = Object.keys(players).map(n => ({ n, ...players[n] })).sort((a, b) => b.p - a.p || b.h - a.h);
-    
-    // 3. Render Bảng Dashboard
-    const tbody = document.getElementById('monthly_dashboard_body');
-    tbody.innerHTML = '';
-    
-    if(sorted.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="padding:20px; color:var(--text-muted);">Tháng này chưa có trận nào</td></tr>';
-        document.getElementById('monthly_stats_container').innerHTML = '';
-        return;
-    }
-
-    sorted.forEach((p, i) => {
-        let rowCls = i === 0 ? 'row-top1' : (i === 1 ? 'row-top2' : (i === 2 ? 'row-top3' : ''));
-        tbody.innerHTML += `
-            <tr class="${rowCls}">
-                <td>${i+1}</td>
-                <td style="text-align:left;"><strong>${p.n}</strong></td>
-                <td>${p.m}</td>
-                <td>${p.w}</td>
-                <td>${p.l}</td>
-                <td>${p.water > 0 ? '+'+p.water : p.water}</td>
-                <td>${p.h > 0 ? '+'+p.h : p.h}</td>
-                <td style="font-size:16px;"><strong>${p.p > 0 ? '+'+p.p : p.p}</strong></td>
-                <td style="font-weight:bold; color:var(--primary);">${p.m > 0 ? Math.round((p.w / p.m) * 100) : 0}%</td>
-            </tr>`;
-    });
-
-    // 4. Render Thống Kê Chi Tiết Tháng (Thẻ bài 3D)
-    const statsContainer = document.getElementById('monthly_stats_container');
-    statsContainer.innerHTML = '';
-    const maxM = Math.max(...sorted.map(x => x.m), 1);
-    const maxWinPoints = Math.max(...sorted.map(x => x.winPoints), 1);
-    
-    sorted.forEach(p => {
-        const winRate = p.m > 0 ? Math.round((p.w / p.m) * 100) : 0;
-        let avaHtml = playerAvatars[p.n] ? `<img src="${playerAvatars[p.n]}">` : String(p.n).charAt(0).toUpperCase();
-        const safeName = p.n ? String(p.n).replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' ') : 'Unknown';
-        
-        statsContainer.innerHTML += `
-            <div class="stat-card" style="cursor: pointer;" onclick="openFutCardModal('${safeName}', ${p.m}, ${p.w}, ${p.p}, ${p.h}, ${p.water}, ${p.m_dub}, ${p.w_dub}, ${p.winPoints}, ${maxM}, ${maxWinPoints})">
-                <div class="stat-avatar">${avaHtml}</div>
-                <div class="stat-info">
-                    <h3 class="stat-name">${p.n}</h3>
-                    <div class="stat-details-grid">
-                        <div class="stat-box" title="Số trận đã cày trong tháng này"><span class="stat-label">Số trận</span><span class="stat-val" style="color: #f1c40f;">${p.m}</span></div>
-                        <div class="stat-box" title="Phần trăm chiến thắng của tháng này"><span class="stat-label">Tỉ lệ thắng</span><span class="stat-val" style="color: #e67e22;">${winRate}%</span></div>
-                        <div class="stat-box" title="Điểm cược kiếm được trong tháng"><span class="stat-label">Điểm Tháng</span><span class="stat-val" style="color: #27ae60;">${p.p > 0 ? '+'+p.p : p.p}</span></div>
-                        <div class="stat-box" title="Độ nước chốt sổ tháng này"><span class="stat-label">Nước</span><span class="stat-val" style="color: #3498db;">${p.water}</span></div>
-                        <div class="stat-box" title="Chênh lệch điểm số set đấu trong tháng"><span class="stat-label">Hiệu số</span><span class="stat-val" style="color: #e74c3c;">${p.h > 0 ? '+'+p.h : p.h}</span></div>
-                        <div class="stat-box" title="Thắng / Thua trong tháng"><span class="stat-label">T/B Trận</span><span class="stat-val" style="color: #9b59b6;">${p.w}/${p.l}</span></div>
-                                   </div>
-            </div>`;
-    });
-}
-function captureMonthlyReport() {
-    document.getElementById('loading_text').innerText = "📸 Đang tạo báo cáo tháng..."; 
-    document.getElementById('loading').style.display = 'flex';
-    
-    const area = document.getElementById('capture_monthly_area');
-    const oldWidth = area.style.width;
-    area.style.width = '600px'; // Ép độ rộng chuẩn cho ảnh báo cáo
-
-    setTimeout(() => {
-        html2canvas(area, { 
-            scale: 2, 
-            backgroundColor: "#12141c", 
-            useCORS: true 
-        }).then(canvas => {
-            area.style.width = oldWidth;
-            const base64Data = canvas.toDataURL('image/jpeg', 0.9);
-            
-            sendAPI({ action: 'save_capture', image: base64Data }, res => {
-                document.getElementById('loading').style.display = 'none';
-                if(res.status === 'success') {
-                    let link = document.createElement('a');
-                    link.href = res.url;
-                    link.download = `Tong-Ket-${document.getElementById('monthly_label').innerText}.jpg`;
-                    link.click();
-                }
-            }, true);
-        });
-    }, 500);
-}
-
-    function logout() {
-        sendAPI({ action: 'logout' }, () => { window.location.reload(); });
-    }
-
-    // ==========================================
-    // JS CHO SUPER ADMIN
-    // ==========================================
-    function switchSATab(tabId) {
-        document.querySelectorAll('#superadmin_screen .tab-pane').forEach(el => el.classList.remove('active'));
-        document.querySelectorAll('#superadmin_screen .tab-btn').forEach(el => el.classList.remove('active'));
-        document.getElementById('tab_sa_' + tabId).classList.add('active');
-        document.getElementById('btn_tab_sa_' + tabId).classList.add('active');
-    }
-
-    function createGroup() {
-        const u = document.getElementById('new_group_user').value;
-        const p = document.getElementById('new_group_pass').value;
-        const n = document.getElementById('new_group_name').value;
-        const e = document.getElementById('new_group_expire').value;
-        if(!u || !p || !n || !e) { alert("Nhập đủ thông tin!"); return; }
-        sendAPI({ action: 'create_group', new_user: u, new_pass: p, new_name: n, expire_date: e }, res => {
-            if(res.status === 'success') { 
-                alert("Đã tạo nhóm thành công!"); 
-                document.getElementById('new_group_user').value = ''; document.getElementById('new_group_pass').value = ''; document.getElementById('new_group_name').value = '';
-                switchSATab('list'); fetchAccounts(); 
-            } else alert(res.message);
-        });
-    }
-
-    function fetchAccounts() {
-        sendAPI({ action: 'fetch_accounts' }, res => {
-            if(res.status === 'success') {
-                superAdminData = res.data;
-                const tbody = document.getElementById('accounts_tbody');
-                tbody.innerHTML = '';
-                const todayStr = getTodayVN();
-
-                res.data.forEach(acc => {
-                    const isExpired = acc.expire_date < todayStr;
-                    const statusBadge = isExpired ? `<span class="badge badge-danger">Hết hạn</span>` : `<span class="badge badge-success">Còn hạn</span>`;
-                    
-                    const dParts = acc.expire_date.split('-');
-                    const niceDate = `${dParts[2]}-${dParts[1]}-${dParts[0]}`;
-
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${acc.id}</td>
-                            <td><strong>${acc.group_name}</strong></td>
-                            <td>${acc.username}</td>
-                            <td>${acc.raw_password}</td>
-                            <td>${niceDate}</td>
-                            <td>${statusBadge}</td>
-                            <td>
-                                <button class="btn-outline" style="padding:8px 12px; font-size:12px; margin-bottom:5px;" onclick="openEditAccount(${acc.id})">✏️ Sửa</button>
-                                <button class="btn-danger" style="padding:8px 12px; font-size:12px;" onclick="deleteAccount(${acc.id})">🗑️ Xóa</button>
-                            </td>
-                        </tr>
-                    `;
-                });
-            }
-        });
-    }
-
-    function openEditAccount(id) {
-        const acc = superAdminData.find(a => a.id == id);
-        if(!acc) return;
-        document.getElementById('edit_acc_id').value = acc.id;
-        document.getElementById('edit_acc_name').value = acc.group_name;
-        document.getElementById('edit_acc_user').value = acc.username;
-        document.getElementById('edit_acc_pass').value = acc.raw_password;
-        document.getElementById('edit_acc_expire').value = acc.expire_date;
-        document.getElementById('edit_account_box').style.display = 'block';
-    }
-
-    function saveEditAccount() {
-        const id = document.getElementById('edit_acc_id').value;
-        const name = document.getElementById('edit_acc_name').value;
-        const user = document.getElementById('edit_acc_user').value;
-        const pass = document.getElementById('edit_acc_pass').value;
-        const exp = document.getElementById('edit_acc_expire').value;
-
-        sendAPI({ action: 'edit_account', id: id, group_name: name, username: user, password: pass, expire_date: exp }, res => {
-            if(res.status === 'success') {
-                alert("Cập nhật tài khoản thành công!");
-                document.getElementById('edit_account_box').style.display = 'none';
-                fetchAccounts();
-            }
-        });
-    }
-
-    function deleteAccount(id) {
-        if(confirm("CẢNH BÁO: Bạn có chắc muốn xóa nhóm này? TOÀN BỘ dữ liệu trận đấu và điểm số của nhóm sẽ bị XÓA SẠCH!")) {
-            sendAPI({ action: 'delete_account', id: id }, res => {
-                if(res.status === 'success') fetchAccounts();
-            });
-        }
-    }
-
-    // ==========================================
-    // JS CHO NGƯỜI THUÊ (APP CHÍNH)
-    // ==========================================
-    function fetchDataFromServer(silent = true) {
-        if(userRole === 'superadmin') return;
-        sendAPI({ action: 'fetch' }, (res) => {
-            if(res.status === 'expired') {
-                alert("Phiên đăng nhập đã hết hạn. Vui lòng liên hệ Admin!"); logout(); return;
-            }
-            if(res.status === 'success') {
-                playerAvatars = res.avatars || {}; 
-                const newDataString = JSON.stringify(res.data) + JSON.stringify(playerAvatars) + res.banner;
-                if (currentDataString !== newDataString) { 
-                    currentDataString = newDataString; 
-                    matches = res.data; 
-                    
-                    if (res.banner) { document.getElementById('main_banner_img').src = res.banner; } 
-                    else { document.getElementById('main_banner_img').src = "logo.png"; }
-                    
-                    renderAll(); 
-                }
-            }
-        }, silent);
-    }
-
-    function switchTab(tabId) {
-        document.querySelectorAll('#app_screen .tab-pane').forEach(el => el.classList.remove('active'));
-        document.querySelectorAll('#app_screen .tab-btn').forEach(el => el.classList.remove('active'));
-        
-        document.getElementById('tab_' + tabId).classList.add('active');
-        document.querySelector(`button[onclick="switchTab('${tabId}')"]`).classList.add('active');
-    }
-
-    function autoHighlightWinner() {
-    const score = document.getElementById('match_score_input').value.trim();
-    if(score.includes('-')) {
-        const pts = score.split('-');
-        const p1 = parseInt(pts[0].trim());
-        const p2 = parseInt(pts[1].trim());
-        if(!isNaN(p1) && !isNaN(p2) && p1 !== p2) {
-            const radioValue = p1 > p2 ? 'team1' : 'team2';
-            const radio = document.querySelector(`input[name="manual_winner"][value="${radioValue}"]`);
-            if(radio) radio.checked = true;
-        }
-    }
-    highlightManualWinner();
-}
-
-function highlightManualWinner() {
-    const box1 = document.getElementById('box_team1');
-    const box2 = document.getElementById('box_team2');
-    box1.classList.remove('active');
-    box2.classList.remove('active');
-    const winnerRadio = document.querySelector('input[name="manual_winner"]:checked');
-    if (winnerRadio && winnerRadio.value === 'team1') box1.classList.add('active');
-    if (winnerRadio && winnerRadio.value === 'team2') box2.classList.add('active');
-}
-
-    function formatName(name) { return name.trim().replace(/\s+/g, ' ').replace(/(^\w|\s\w)/g, m => m.toUpperCase()); }
-
-    function saveMatch() {
-    if(userRole !== 'admin') return;
-    const t1 = [formatName(document.getElementById('t1_p1').value), formatName(document.getElementById('t1_p2').value)].filter(n => n);
-    const t2 = [formatName(document.getElementById('t2_p1').value), formatName(document.getElementById('t2_p2').value)].filter(n => n);
-    const bet = parseInt(document.getElementById('bet_amount').value) || 1;
-    const water = parseInt(document.getElementById('water_amount').value) || 0;
-    const matchDate = document.getElementById('match_date_input').value; 
-    const isDon = document.querySelector('input[name="match_type"]:checked').value === 'don';
-
-    const matchScore = document.getElementById('match_score_input').value.trim();
-
-    if (!matchDate) { alert("Vui lòng chọn ngày thi đấu!"); return; }
-    
-    let winner = '';
-
-    if (matchScore) {
-        if (matchScore.includes(',')) {
-            alert("❌ Lỗi: Vui lòng chỉ nhập tỉ số của 1 set đấu duy nhất (Ví dụ: 21-19). Không dùng dấu phẩy!");
-            return;
-        }
-        const scoreParts = matchScore.split('-');
-        if(scoreParts.length !== 2) { 
-            alert("❌ Tỉ số không đúng định dạng (Ví dụ: 21-19)"); 
-            return; 
-        }
-        const p1 = parseInt(scoreParts[0].trim());
-        const p2 = parseInt(scoreParts[1].trim());
-        
-        if(isNaN(p1) || isNaN(p2) || p1 === p2) { 
-            alert("❌ Tỉ số không hợp lệ hoặc hòa (Không có hòa)!"); 
-            return; 
-        }
-        winner = p1 > p2 ? 'team1' : 'team2';
-    } else {
-        const winnerRadio = document.querySelector('input[name="manual_winner"]:checked');
-        if (!winnerRadio) {
-            alert("Vui lòng CHỌN ĐỘI THẮNG (nếu không nhập tỉ số)!");
-            return;
-        }
-        winner = winnerRadio.value;
-    }
-
-    // Kiểm tra số lượng tay vợt
-    if (isDon) {
-        if (t1.length < 1 || t2.length < 1) { alert("Vui lòng nhập đủ 2 tên tay vợt thi đấu Đơn!"); return; }
-    } else {
-        if (t1.length < 2 || t2.length < 2) { alert("Nhập đủ 4 tên nhé!"); return; }
-    }
-
-    const editId = document.getElementById('edit_match_id').value;
-    const now = new Date();
-    
-    if (editId) {
-        sendAPI({ action: 'edit', match: { id: editId, date: matchDate, team1: t1, team2: t2, bet: bet, water: water, score: matchScore, winner: winner } }, () => { cancelEdit(); fetchDataFromServer(false); }, false);
-    } else {
-        sendAPI({ action: 'add', match: { id: Date.now(), date: matchDate, time: now.toLocaleTimeString(), team1: t1, team2: t2, bet: bet, water: water, score: matchScore, winner: winner } }, () => {
-            document.getElementById('t1_p1').value = ""; 
-            document.getElementById('t1_p2').value = ""; 
-            document.getElementById('t2_p1').value = ""; 
-            document.getElementById('t2_p2').value = ""; 
-            document.getElementById('match_score_input').value = ""; 
-            document.querySelectorAll('input[name="manual_winner"]').forEach(r => r.checked = false);
-            fetchDataFromServer(false); 
-            highlightManualWinner();
-        }, false);
-    }
-}
-
-    function editMatch(id) {
-    if(userRole !== 'admin') return;
-    const match = matches.find(m => m.id == id);
-    if(!match) return;
-    document.getElementById('match_date_input').value = match.date; 
-    document.getElementById('t1_p1').value = match.team1[0] || ''; 
-    document.getElementById('t1_p2').value = match.team1[1] || '';
-    document.getElementById('t2_p1').value = match.team2[0] || ''; 
-    document.getElementById('t2_p2').value = match.team2[1] || '';
-    document.getElementById('bet_amount').value = match.bet;
-    document.getElementById('water_amount').value = match.water || 0;
-    document.getElementById('match_score_input').value = match.score || '';
-
-    const radioToSelect = document.querySelector(`input[name="manual_winner"][value="${match.winner}"]`);
-    if(radioToSelect) radioToSelect.checked = true;
-
-    const isDon = match.team1.length === 1 && match.team2.length === 1;
-    document.querySelector(`input[name="match_type"][value="${isDon ? 'don' : 'doi'}"]`).checked = true;
-    toggleMatchType();
-
-    document.getElementById('edit_match_id').value = match.id;
-    document.getElementById('form_title').innerText = "Sửa Trận Đấu 3D"; 
-    document.getElementById('btn_save').innerText = "Cập Nhật Dữ Liệu";
-    document.getElementById('btn_cancel').style.display = "block"; 
-    highlightManualWinner(); 
-    window.scrollTo(0, 0); 
-}
-
-function cancelEdit() {
-    document.getElementById('edit_match_id').value = ""; 
-    document.getElementById('form_title').innerText = "Thêm Trận Đấu Mới";
-    document.getElementById('match_date_input').value = getTodayVN();
-    document.getElementById('match_score_input').value = "";
-
-    document.querySelector('input[name="match_type"][value="doi"]').checked = true;
-    toggleMatchType();
-
-    document.getElementById('btn_save').innerText = "LƯU TRẬN ĐẤU"; 
-    document.getElementById('btn_cancel').style.display = "none";
-    document.getElementById('t1_p1').value = ""; 
-    document.getElementById('t1_p2').value = ""; 
-    document.getElementById('t2_p1').value = ""; 
-    document.getElementById('t2_p2').value = "";
-    document.getElementById('bet_amount').value = "1";
-    document.getElementById('water_amount').value = "0";
-    
-    document.querySelectorAll('input[name="manual_winner"]').forEach(r => r.checked = false);
-    highlightManualWinner();
-}
-
-    function deleteMatch(id) { if(userRole === 'admin' && confirm("Xóa trận đấu này?")) sendAPI({ action: 'delete', id: id }, () => fetchDataFromServer(false), false); }
-    
-    function resetFilter() { const today = getTodayVN(); document.getElementById('date_from').value = today; document.getElementById('date_to').value = today; renderAll(); }
-    
-    function captureDashboard() {
-        document.getElementById('loading_text').innerText = "📸 Đang xử lý ảnh..."; 
-        document.getElementById('loading').style.display = 'flex';
-        
-        const isDark = document.body.classList.contains('dark-mode');
-        if(!isDark) document.body.classList.add('dark-mode');
-
-        const captureArea = document.getElementById('capture_area'); 
-        const tableResponsive = captureArea.querySelector('.table-responsive');
-        
-        // Lưu lại style cũ
-        const oldOverflow = tableResponsive ? tableResponsive.style.overflow : ''; 
-        const oldOverflowX = tableResponsive ? tableResponsive.style.overflowX : ''; 
-        const oldWidth = captureArea.style.width;
-        
-        // Ép width ra full để html2canvas chụp không bị cắt xén
-        if (tableResponsive) {
-            tableResponsive.style.overflow = 'visible';
-            tableResponsive.style.overflowX = 'visible';
-        }
-        captureArea.style.width = captureArea.scrollWidth + 'px';
-
-        // Dùng scale 1.5 cho Mobile để nét hơn nhưng không gây tràn RAM
-        const captureScale = window.innerWidth <= 768 ? 1.5 : 2;
-
-        setTimeout(() => {
-            html2canvas(captureArea, { 
-                scale: captureScale, 
-                backgroundColor: "#12141c", 
-                useCORS: true,
-                logging: false,
-                width: captureArea.scrollWidth,
-                windowWidth: captureArea.scrollWidth
-            }).then(canvas => {
-                // Trả lại style cũ ngay sau khi chụp xong
-                if (tableResponsive) {
-                    tableResponsive.style.overflow = oldOverflow;
-                    tableResponsive.style.overflowX = oldOverflowX;
-                }
-                captureArea.style.width = oldWidth;
-                if(!isDark) document.body.classList.remove('dark-mode'); 
-                
-                // Nén JPEG ở mức 0.8 để gửi lên PHP nhẹ nhàng
-                const base64Data = canvas.toDataURL('image/jpeg', 0.8);
-
-                // Gửi ảnh lên server PHP
-                sendAPI({ action: 'save_capture', image: base64Data }, res => {
-                    document.getElementById('loading').style.display = 'none';
-                    if(res.status === 'success') {
-                        let link = document.createElement('a');
-                        link.href = res.url;
-                        link.download = 'Bang-Phong-Than.jpg';
-                        link.click();
-                    } else {
-                        alert("❌ Lỗi lưu ảnh trên server!");
-                    }
-                }, true);
-
-            }).catch(err => { 
-                if (tableResponsive) {
-                    tableResponsive.style.overflow = oldOverflow;
-                    tableResponsive.style.overflowX = oldOverflowX;
-                }
-                captureArea.style.width = oldWidth;
-                if(!isDark) document.body.classList.remove('dark-mode');
-                document.getElementById('loading').style.display = 'none'; 
-                alert("❌ Lỗi tạo ảnh!");
-            });
-        }, 500);
-    }
-
-function captureHistory() {
-        document.getElementById('loading_text').innerText = "📸 Đang xử lý ảnh lịch sử..."; 
-        document.getElementById('loading').style.display = 'flex';
-        
-        const isDark = document.body.classList.contains('dark-mode');
-        if(!isDark) document.body.classList.add('dark-mode');
-
-        const captureArea = document.getElementById('capture_history_area'); 
-        
-        // Tạm thời ẩn các nút rác (Sửa/Xóa, Chuyển ngày) để ảnh chụp trông chuyên nghiệp hơn
-        const actions = captureArea.querySelectorAll('.card-actions');
-        const pagination = document.getElementById('history_pagination');
-        actions.forEach(el => el.style.display = 'none');
-        if (pagination) pagination.style.display = 'none';
-
-        // Lưu lại style cũ
-        const oldWidth = captureArea.style.width;
-        captureArea.style.width = captureArea.scrollWidth + 'px';
-
-        // Dùng scale 1.5 cho Mobile để nét hơn nhưng không gây tràn RAM
-        const captureScale = window.innerWidth <= 768 ? 1.5 : 2;
-
-        setTimeout(() => {
-            html2canvas(captureArea, { 
-                scale: captureScale, 
-                backgroundColor: "#12141c", 
-                useCORS: true,
-                logging: false,
-                width: captureArea.scrollWidth,
-                windowWidth: captureArea.scrollWidth
-            }).then(canvas => {
-                // Trả lại style và nút hiển thị
-                captureArea.style.width = oldWidth;
-                actions.forEach(el => el.style.display = '');
-                if (pagination) pagination.style.display = 'flex';
-                if(!isDark) document.body.classList.remove('dark-mode'); 
-                
-                // Nén JPEG ở mức 0.8 để gửi lên PHP nhẹ nhàng
-                const base64Data = canvas.toDataURL('image/jpeg', 0.8);
-
-                // Gửi ảnh lên server PHP
-                sendAPI({ action: 'save_capture', image: base64Data }, res => {
-                    document.getElementById('loading').style.display = 'none';
-                    if(res.status === 'success') {
-                        let link = document.createElement('a');
-                        link.href = res.url;
-                        link.download = 'Lich-Su-Tran-Dau.jpg';
-                        link.click();
-                    } else {
-                        alert("❌ Lỗi lưu ảnh trên server!");
-                    }
-                }, true);
-
-            }).catch(err => { 
-                captureArea.style.width = oldWidth;
-                actions.forEach(el => el.style.display = '');
-                if (pagination) pagination.style.display = 'flex';
-                if(!isDark) document.body.classList.remove('dark-mode');
-                document.getElementById('loading').style.display = 'none'; 
-                alert("❌ Lỗi tạo ảnh!");
-            });
-        }, 500);
-    }
-
-// Thêm hàm tạo Pop-up hiển thị ảnh
-function showImagePreviewModal(imgSrc) {
-    const oldModal = document.getElementById('preview_modal_3d');
-    if (oldModal) oldModal.remove();
-
-    const modalHtml = `
-        <div id="preview_modal_3d" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 10001; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
-            <p style="color: #2ecc71; font-weight: bold; font-size: 16px; margin-bottom: 10px; text-align: center;">✅ Đã chụp bảng điểm!</p>
-            <p style="color: white; font-size: 14px; margin-bottom: 20px; text-align: center;">👇 <b>Chạm và giữ</b> vào ảnh bên dưới, chọn "Lưu hình ảnh" để tải về máy.</p>
-            <div style="width: 100%; max-height: 70vh; overflow-y: auto; border: 2px solid var(--primary); border-radius: 12px; box-shadow: 0 0 15px rgba(52, 152, 219, 0.5);">
-                <img src="${imgSrc}" style="width: 100%; height: auto; display: block; touch-action: none; pointer-events: auto;">
-            </div>
-            <button onclick="document.getElementById('preview_modal_3d').remove()" style="margin-top: 20px; padding: 12px 40px; background: var(--danger); color: white; border: none; border-radius: 12px; font-weight: bold; font-size: 16px; cursor: pointer;">Đóng</button>
+    <!-- MODAL ĐỔI MẬT KHẨU -->
+    <div id="change_pass_modal" class="stats-modal">
+        <div class="modal-content-wrapper" style="width: 350px;">
+            <span class="close-modal" onclick="document.getElementById('change_pass_modal').style.display='none'">&times;</span>
+            <h3 style="color: var(--primary); margin-top:0; margin-bottom: 20px;">🔑 Đổi Mật Khẩu</h3>
+            <input type="password" id="cp_new_pass" placeholder="Nhập mật khẩu mới">
+            <input type="password" id="cp_confirm_pass" placeholder="Nhập lại mật khẩu mới">
+            <button class="btn-success" onclick="submitChangePassword()" style="width: 100%; margin-top: 15px; padding: 15px;">💾 Cập Nhật Mật Khẩu</button>
         </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
-
-    function triggerAvatarUpload(playerName) {
-        if (userRole !== 'admin') return;
-        currentAvatarPlayer = playerName; document.getElementById('avatar_file_input').click();
-    }
-
-    function handleAvatarSelection(event) {
-        const file = event.target.files[0]; if (!file) return;
-        
-        if (file.size > 10 * 1024 * 1024) {
-            alert("❌ File ảnh quá nặng (vượt mức 10MB). Vui lòng chọn ảnh khác!");
-            event.target.value = ""; return;
-        }
-
-        document.getElementById('loading_text').innerText = "📸 Đang nén & tối ưu ảnh..."; document.getElementById('loading').style.display = 'flex';
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const img = new Image();
-            img.onload = function() {
-                const canvas = document.createElement('canvas'); 
-                
-                const MAX_SIZE = 800; 
-                let width = img.width; let height = img.height;
-                if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } } else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
-                
-                canvas.width = width; canvas.height = height; 
-                const ctx = canvas.getContext('2d'); 
-                
-                ctx.fillStyle = "#12141c"; // Nền tối
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                const base64String = canvas.toDataURL('image/webp', 0.85); 
-                
-                sendAPI({ action: 'upload_avatar', name: currentAvatarPlayer, image: base64String }, () => { document.getElementById('avatar_file_input').value = ""; fetchDataFromServer(false); }, false);
-            }
-            img.src = e.target.result;
-        }
-        reader.readAsDataURL(file);
-    }
-
-    function handleBannerSelection(event) {
-        const file = event.target.files[0]; if (!file) return;
-        
-        if (file.size > 10 * 1024 * 1024) {
-            alert("❌ File ảnh bìa quá nặng (vượt mức 10MB). Vui lòng chọn ảnh khác!");
-            event.target.value = ""; return;
-        }
-
-        document.getElementById('loading_text').innerText = "📸 Đang nén Banner..."; document.getElementById('loading').style.display = 'flex';
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const img = new Image();
-            img.onload = function() {
-                const canvas = document.createElement('canvas'); 
-                
-                const MAX_WIDTH = 1200; 
-                let width = img.width; let height = img.height;
-                if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-                
-                canvas.width = width; canvas.height = height; 
-                const ctx = canvas.getContext('2d'); 
-                
-                ctx.fillStyle = "#12141c"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                const base64String = canvas.toDataURL('image/webp', 0.85); 
-                
-                sendAPI({ action: 'upload_banner', image: base64String }, () => { document.getElementById('banner_file_input').value = ""; fetchDataFromServer(false); }, false);
-            }
-            img.src = e.target.result;
-        }
-        reader.readAsDataURL(file);
-    }
-    
-    // --- LOGIC CUSTOM AUTOCOMPLETE TÊN NGƯỜI CHƠI ---
-let allPlayerNames = [];
-
-function updatePlayerDatalist(playersArray) {
-    // Chỉ lưu mảng tên vào bộ nhớ, không dùng datalist nữa
-    allPlayerNames = playersArray.map(p => p.n);
-}
-
-// Khởi tạo tính năng gợi ý tên khi trang load xong
-document.addEventListener("DOMContentLoaded", function() {
-    const inputIds = ['t1_p1', 't1_p2', 't2_p1', 't2_p2'];
-    
-    inputIds.forEach(id => {
-        const input = document.getElementById(id);
-        if(!input) return;
-        
-        // Tạo hộp thoại gợi ý
-        const suggestionBox = document.createElement('div');
-        suggestionBox.className = 'custom-autocomplete-box';
-        input.parentNode.appendChild(suggestionBox);
-
-        // Bắt sự kiện gõ phím hoặc focus
-        input.addEventListener('input', function() { showSuggestions(this, suggestionBox); });
-        input.addEventListener('focus', function() { showSuggestions(this, suggestionBox); });
-        
-        // Ẩn bảng khi bấm ra chỗ khác
-        document.addEventListener('click', function(e) {
-            if (e.target !== input && !suggestionBox.contains(e.target)) {
-                suggestionBox.style.display = 'none';
-            }
-        });
-    });
-});
-
-function showSuggestions(input, box) {
-    const val = input.value.toLowerCase().trim();
-    
-    // Lọc những tên chứa từ khóa (hoặc hiện tất cả nếu chưa gõ gì)
-    const matches = allPlayerNames.filter(n => n.toLowerCase().includes(val));
-    
-    if (matches.length === 0) {
-        box.style.display = 'none';
-        return;
-    }
-
-    box.innerHTML = '';
-    matches.forEach(name => {
-        const item = document.createElement('div');
-        item.className = 'custom-suggestion-item';
-        // Avatar nhỏ đi kèm (nếu có) để tăng độ premium
-        let avaHtml = playerAvatars[name] ? `<img src="${playerAvatars[name]}" style="width:24px;height:24px;border-radius:50%;vertical-align:middle;margin-right:8px;object-fit:cover;">` : `👤 `;
-        
-        item.innerHTML = avaHtml + name;
-        item.onclick = function() {
-            input.value = name;
-            box.style.display = 'none';
-		checkHeadToHead();
-        };
-        box.appendChild(item);
-    });
-
-    box.style.display = 'block';
-}
-
-    function renderAvatarHTML(playerName, isPodium = false) {
-        if (!playerName || playerName === 'undefined') return '';
-        if (playerAvatars[playerName]) return `<img src="${playerAvatars[playerName]}" alt="${playerName}">`;
-        return String(playerName).charAt(0).toUpperCase();
-    }
-
-    function renderAll() {
-        try {
-            const d1 = document.getElementById('date_from').value; 
-            const d2 = document.getElementById('date_to').value;
-            const formatDate = (dateStr) => { if(!dateStr) return ""; const parts = String(dateStr).split('-'); return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dateStr; };
-            
-            const dateText = (d1 === d2) ? `(Ngày ${formatDate(d1)})` : `(${formatDate(d1)} - ${formatDate(d2)})`;
-            
-            const dashboardDateDisplay = document.getElementById('dashboard_date_display');
-            if(dashboardDateDisplay) dashboardDateDisplay.innerText = dateText; 
-            const historyDateDisplay = document.getElementById('history_date_display');
-            if(historyDateDisplay) historyDateDisplay.innerText = dateText; 
-            const statsDateDisplay = document.getElementById('stats_date_display');
-            if(statsDateDisplay) statsDateDisplay.innerText = "(Toàn thời gian)";
-
-            const filtered = matches.filter(m => {
-                if(!m.date) return false;
-                return m.date >= d1 && m.date <= d2;
-            });
-            
-            let filteredPlayers = {};
-            filtered.forEach(m => {
-                const team1 = Array.isArray(m.team1) ? m.team1.filter(Boolean) : [];
-                const team2 = Array.isArray(m.team2) ? m.team2.filter(Boolean) : [];
-                [...team1, ...team2].forEach(p => { if(!filteredPlayers[p]) filteredPlayers[p] = { m: 0, w: 0, l: 0, p: 0, h: 0, winPoints: 0, losePoints: 0, waterBalance: 0 }; });
-                
-                const wT = m.winner === 'team1' ? team1 : team2; 
-                const lT = m.winner === 'team1' ? team2 : team1;
-                const waterBet = m.water ? parseInt(m.water) : 0; 
-                
-                let t1_score = 0; let t2_score = 0;
-                if (m.score && String(m.score).trim() !== "") {
-                    const sets = String(m.score).split(',');
-                    sets.forEach(s => {
-                        const pts = s.split('-');
-                        if(pts.length >= 2) {
-                            t1_score += parseInt(pts[0].trim()) || 0;
-                            t2_score += parseInt(pts[1].trim()) || 0;
-                        }
-                    });
-                }
-                const t1_diff = t1_score - t2_score;
-                const t2_diff = t2_score - t1_score;
-
-                team1.forEach(p => { filteredPlayers[p].h += t1_diff; });
-                team2.forEach(p => { filteredPlayers[p].h += t2_diff; });
-                
-                wT.forEach(p => { filteredPlayers[p].m++; filteredPlayers[p].w++; filteredPlayers[p].p += m.bet; filteredPlayers[p].winPoints += m.bet; filteredPlayers[p].waterBalance += waterBet; });
-                lT.forEach(p => { filteredPlayers[p].m++; filteredPlayers[p].l++; filteredPlayers[p].p -= m.bet; filteredPlayers[p].losePoints += m.bet; filteredPlayers[p].waterBalance -= waterBet; });
-            });
-            
-            const arrFiltered = Object.keys(filteredPlayers).map(n => ({ n, ...filteredPlayers[n] })).sort((a, b) => {
-                if (b.p !== a.p) return b.p - a.p;
-                return b.h - a.h;
-            });
-            
-            const waterLosers = Object.keys(filteredPlayers).map(n => ({ n, waterBalance: filteredPlayers[n].waterBalance })).filter(p => p.waterBalance < 0).sort((a, b) => a.waterBalance - b.waterBalance).slice(0, 3).map(p => p.n);
-
-            let allTimePlayers = {};
-            matches.forEach(m => {
-                const team1 = Array.isArray(m.team1) ? m.team1.filter(Boolean) : [];
-                const team2 = Array.isArray(m.team2) ? m.team2.filter(Boolean) : [];
-                const isDub = (team1.length === 2 && team2.length === 2); // Thêm cờ đánh đôi
-                
-                [...team1, ...team2].forEach(p => { 
-                    if(!allTimePlayers[p]) allTimePlayers[p] = { m: 0, w: 0, l: 0, p: 0, h: 0, winPoints: 0, losePoints: 0, waterBalance: 0, m_dub: 0, w_dub: 0 }; 
-                    if(isDub) allTimePlayers[p].m_dub++; // Tính số trận đôi
-                });
-                
-                const wT = m.winner === 'team1' ? team1 : team2; 
-                const lT = m.winner === 'team1' ? team2 : team1;
-                const waterBet = m.water ? parseInt(m.water) : 0;
-
-                let t1_score = 0; let t2_score = 0;
-                if (m.score && String(m.score).trim() !== "") {
-                    const sets = String(m.score).split(',');
-                    sets.forEach(s => {
-                        const pts = s.split('-');
-                        if(pts.length >= 2) {
-                            t1_score += parseInt(pts[0].trim()) || 0;
-                            t2_score += parseInt(pts[1].trim()) || 0;
-                        }
-                    });
-                }
-                const t1_diff = t1_score - t2_score;
-                const t2_diff = t2_score - t1_score;
-
-                team1.forEach(p => { allTimePlayers[p].h += t1_diff; });
-                team2.forEach(p => { allTimePlayers[p].h += t2_diff; });
-
-                wT.forEach(p => { 
-                    allTimePlayers[p].m++; allTimePlayers[p].w++; allTimePlayers[p].p += m.bet; allTimePlayers[p].winPoints += m.bet; allTimePlayers[p].waterBalance += waterBet;
-                    if(isDub) allTimePlayers[p].w_dub++; // Tính thắng đôi
-                });
-                lT.forEach(p => { allTimePlayers[p].m++; allTimePlayers[p].l++; allTimePlayers[p].p -= m.bet; allTimePlayers[p].losePoints += m.bet; allTimePlayers[p].waterBalance -= waterBet;});
-            });
-            
-            const arrAllTime = Object.keys(allTimePlayers).map(n => ({ n, ...allTimePlayers[n] })).sort((a, b) => {
-                if (b.p !== a.p) return b.p - a.p;
-                return b.h - a.h;
-            });
-            updatePlayerDatalist(arrAllTime);
-
-            // ==========================================
-            // TÍNH TOÁN WINSTREAK / LOSESTREAK
-            // ==========================================
-            let playerStreaks = {};
-            matches.forEach(m => {
-                const wT = m.winner === 'team1' ? (Array.isArray(m.team1)?m.team1:[]) : (m.winner === 'team2' ? (Array.isArray(m.team2)?m.team2:[]) : []);
-                const lT = m.winner === 'team1' ? (Array.isArray(m.team2)?m.team2:[]) : (m.winner === 'team2' ? (Array.isArray(m.team1)?m.team1:[]) : []);
-                
-                wT.filter(Boolean).forEach(p => {
-                    if(!playerStreaks[p]) playerStreaks[p] = { type: 'W', count: 0 };
-                    if(playerStreaks[p].type === 'W') playerStreaks[p].count++;
-                    else playerStreaks[p] = { type: 'W', count: 1 };
-                });
-                
-                lT.filter(Boolean).forEach(p => {
-                    if(!playerStreaks[p]) playerStreaks[p] = { type: 'L', count: 0 };
-                    if(playerStreaks[p].type === 'L') playerStreaks[p].count++;
-                    else playerStreaks[p] = { type: 'L', count: 1 };
-                });
-            });
-
-            // ==========================================
-            // RENDER BẢNG PHONG THẦN
-            // ==========================================
-            const tbody = document.getElementById('dashboard_body'); 
-            if(tbody) {
-                tbody.innerHTML = '';
-                if(arrFiltered.length===0) { tbody.innerHTML = '<tr><td colspan="8" style="color: var(--text-muted);font-style:italic; border:none;">Chưa có dữ liệu</td></tr>'; }
-                else {
-                    arrFiltered.forEach((p, i) => {
-                        let rClass = ''; let stt = i + 1; let pointColor = 'inherit'; 
-                        
-                        if (i === 0) rClass = 'row-top1'; else if (i === 1) rClass = 'row-top2'; else if (i === 2) rClass = 'row-top3';
-                        let isBot = false;
-                        if (arrFiltered.length >= 4) {
-                            if (i === arrFiltered.length - 1) { rClass = 'row-bot1'; isBot = true; }
-                            else if (i === arrFiltered.length - 2) { rClass = 'row-bot2'; isBot = true; }
-                            else if (i === arrFiltered.length - 3) { rClass = 'row-bot3'; isBot = true; }
-                        }
-                        if (rClass === '') pointColor = p.p > 0 ? 'var(--success)' : (p.p < 0 ? 'var(--danger)' : 'var(--text-main)');
-                        
-                        let titleBadge = '';
-                        if (i === 0 && p.p > 0) titleBadge += `<span class="badge-title title-top1">👑 Kẻ Huỷ Diệt</span>`;
-                        else if ((i === 1 || i === 2) && p.p > 0) titleBadge += `<span class="badge-title title-top23">⚔️ Cao Thủ</span>`;
-                        if (isBot && p.p < 0) titleBadge += ` <span class="badge-title title-bot">🐆 Vua Báo Thủ</span>`;
-                        if (waterLosers.includes(p.n)) titleBadge += ` <span class="badge-title title-water">🥤 Thần Nước</span>`;
-
-                        if (p.m >= 20) titleBadge += `<span class="badge-title" style="background: linear-gradient(145deg, #9b59b6, #8e44ad); border: 1px solid #8e44ad;">🤖 Thánh Bào Điểm</span>`;
-                        const winRate = p.m > 0 ? (p.w / p.m) : 0;
-                        if (p.m >= 5 && winRate >= 0.8) titleBadge += `<span class="badge-title" style="background: linear-gradient(145deg, #2ecc71, #27ae60); border: 1px solid #27ae60;">🛡️ Bất Bại</span>`;
-                        if (p.waterBalance <= -20) titleBadge += `<span class="badge-title" style="background: linear-gradient(145deg, #34495e, #2c3e50); border: 1px solid #2c3e50;">🧊 Trúng Thủy Độc</span>`;
-
-                        let streakHtml = '';
-                        if (playerStreaks[p.n] && playerStreaks[p.n].count >= 3) {
-                            if (playerStreaks[p.n].type === 'W') {
-                                streakHtml = `<span class="streak-badge streak-win" title="Đang thắng ${playerStreaks[p.n].count} trận liên tiếp">🔥 x${playerStreaks[p.n].count}</span>`;
-                            } else if (playerStreaks[p.n].type === 'L') {
-                                streakHtml = `<span class="streak-badge streak-lose" title="Đang thua ${playerStreaks[p.n].count} trận liên tiếp">🥶 x${playerStreaks[p.n].count}</span>`;
-                            }
-                        }
-                        
-                        let waterText = p.waterBalance > 0 ? '+' + p.waterBalance : p.waterBalance;
-                        let hText = p.h > 0 ? '+' + p.h : p.h; 
-                        
-                        tbody.innerHTML += `<tr class="${rClass}"><td><strong>${stt}</strong></td><td style="text-align:left;"><strong>${p.n}</strong> ${streakHtml} <br> ${titleBadge}</td><td>${p.m}</td><td>${p.w}</td><td>${p.l}</td><td>${waterText}</td><td><strong>${hText}</strong></td><td style="color:${pointColor}; font-size:18px;"><strong>${p.p>0?'+'+p.p:p.p}</strong></td><td style="font-weight:bold; color:var(--primary);">${Math.round(winRate * 100)}%</td></tr>`;
-                    });
-                }
-            }
-
-            currentFilteredMatches = [...filtered];
-            uniqueHistoryDates = [...new Set(currentFilteredMatches.map(m => m.date))].sort((a, b) => new Date(b) - new Date(a));
-            if (!uniqueHistoryDates[currentHistoryDateIndex]) currentHistoryDateIndex = 0;
-            renderHistoryGrid();
-
-            // ==========================================
-            // RENDER BỤC VINH QUANG
-            // ==========================================
-            const renderPodium = (arr, type) => {
-                if(!arr || arr.length === 0) return `<p style="text-align:center;width:100%;color:var(--text-muted);font-style:italic;">Chưa có dữ liệu</p>`;
-                let clsPrefix = 'podium';
-                if (type === 'bot') clsPrefix = 'podium-bot';
-                if (type === 'water') clsPrefix = 'podium-water';
-                
-                const getScore = (p) => {
-                    if (type === 'water') return p.waterBalance;
-                    return p.p > 0 ? '+'+p.p : p.p;
-                };
-
-                const p1 = arr[0];
-                const p2 = arr.length > 1 ? arr[1] : null;
-                const p3 = arr.length > 2 ? arr[2] : null;
-
-                let html = '';
-                if (p2) html += `<div class="podium-box ${clsPrefix}-2"><div class="podium-avatar">${renderAvatarHTML(p2.n, true)}</div><div class="podium-name">${p2.n}</div><div class="podium-score">${getScore(p2)}</div></div>`;
-                if (p1) html += `<div class="podium-box ${clsPrefix}-1"><div class="podium-avatar">${renderAvatarHTML(p1.n, true)}</div><div class="podium-name">${p1.n}</div><div class="podium-score">${getScore(p1)}</div></div>`;
-                if (p3) html += `<div class="podium-box ${clsPrefix}-3"><div class="podium-avatar">${renderAvatarHTML(p3.n, true)}</div><div class="podium-name">${p3.n}</div><div class="podium-score">${getScore(p3)}</div></div>`;
-                return html;
-            };
-            
-            const top3Arr = arrFiltered.slice(0, 3);
-            const bot3Arr = [...arrFiltered].reverse().slice(0, 3);
-            const water3Arr = [...arrFiltered].filter(p => p.waterBalance < 0).sort((a, b) => a.waterBalance - b.waterBalance).slice(0, 3);
-            
-            const top3El = document.getElementById('top3_podium');
-            if(top3El) top3El.innerHTML = renderPodium(top3Arr, 'top');
-            const bot3El = document.getElementById('bottom3_podium');
-            if(bot3El) bot3El.innerHTML = renderPodium(bot3Arr, 'bot');
-            const water3El = document.getElementById('water3_podium');
-            if(water3El) water3El.innerHTML = renderPodium(water3Arr, 'water');
-
-            // ==========================================
-            // RENDER THỐNG KÊ CHI TIẾT (TÍCH HỢP FUT CARD)
-            // ==========================================
-            const statsContainer = document.getElementById('stats_container'); 
-            if(statsContainer) {
-                statsContainer.innerHTML = '';
-                if (arrAllTime.length === 0) {
-                    statsContainer.innerHTML = '<div style="text-align:center; width:100%; grid-column: 1 / -1; padding: 20px; color: var(--text-muted); font-style: italic;">Chưa có dữ liệu thống kê nào.</div>';
-                } else {
-                    let statsHTML = ''; 
-                    const maxM = Math.max(...arrAllTime.map(x => x.m), 1);
-                    const maxWinPoints = Math.max(...arrAllTime.map(x => x.winPoints), 1);
-
-                    arrAllTime.forEach(p => {
-                        const winRate = p.m > 0 ? Math.round((p.w / p.m) * 100) : 0;
-                        let avaHtml = (p.n && String(p.n) !== 'undefined') ? (playerAvatars[p.n] ? `<img src="${playerAvatars[p.n]}">` : String(p.n).charAt(0).toUpperCase()) : '';
-                        const safeName = p.n ? String(p.n).replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' ') : 'Unknown';
-                        const overlayHtml = userRole === 'admin' ? `<div class="upload-overlay">📷 Đổi</div>` : '';
-                        let hText = p.h > 0 ? '+' + p.h : p.h; 
-                        
-                        statsHTML += `
-                        <div class="stat-card" style="cursor: pointer;" onclick="openFutCardModal('${safeName}', ${p.m}, ${p.w}, ${p.p}, ${p.h}, ${p.waterBalance}, ${p.m_dub || 0}, ${p.w_dub || 0}, ${p.winPoints}, ${maxM}, ${maxWinPoints})">
-                            <div class="stat-avatar" onclick="event.stopPropagation(); triggerAvatarUpload('${safeName}')">${avaHtml}${overlayHtml}</div>
-                            <div class="stat-info">
-                                <h3 class="stat-name">${p.n}</h3>
-                                <div class="stat-details-grid">
-                                    <div class="stat-box" title="Tổng số trận đã tham gia thi đấu"><span class="stat-label">Số trận</span><span class="stat-val" style="color: #f1c40f;">${p.m}</span></div>
-                                    <div class="stat-box" title="Phần trăm chiến thắng (Thắng / Tổng trận)"><span class="stat-label">Tỉ lệ thắng</span><span class="stat-val" style="color: #e67e22;">${winRate}%</span></div>
-                                    <div class="stat-box" title="Tổng điểm cược (Dương là có lời, Âm là xa bờ)"><span class="stat-label">Tổng Điểm</span><span class="stat-val" style="color: #27ae60;">${p.p}</span></div>
-                                    <div class="stat-box" title="Tổng số ly nước hiện tại (Âm là đang nợ)"><span class="stat-label">Nước</span><span class="stat-val" style="color: #3498db;">${p.waterBalance}</span></div>
-                                    <div class="stat-box" title="Tổng chênh lệch điểm số các set đấu (+ là hay thắng đậm)"><span class="stat-label">Hiệu số</span><span class="stat-val" style="color: #e74c3c;">${hText}</span></div>
-                                    <div class="stat-box" title="Số trận Thắng / Số trận Thua"><span class="stat-label">T/B Trận</span><span class="stat-val" style="color: #9b59b6;">${p.w}/${p.l}</span></div>
-                                </div>
-                            </div>
-                        </div>`;
-                    });
-                    statsContainer.innerHTML = statsHTML;
-                }
-            }
-        } catch(err) { console.error("Lỗi khi renderAll:", err); }
-    }
-
-    function changeHistoryDate(step) {
-        currentHistoryDateIndex += step;
-        if (currentHistoryDateIndex < 0) currentHistoryDateIndex = 0;
-        if (currentHistoryDateIndex >= uniqueHistoryDates.length) currentHistoryDateIndex = uniqueHistoryDates.length - 1;
-        renderHistoryGrid();
-    }
-
-    function renderHistoryGrid() {
-        try {
-            const grid = document.getElementById('history_grid'); grid.innerHTML = '';
-            const paginationDiv = document.getElementById('history_pagination');
-            
-            if (!uniqueHistoryDates || uniqueHistoryDates.length === 0) {
-                if(paginationDiv) paginationDiv.style.display = 'none';
-                grid.innerHTML = '<p style="color: var(--text-muted);font-style:italic;text-align:center;width:100%;">Không có trận đấu nào.</p>';
-                return;
-            }
-
-            if(paginationDiv) paginationDiv.style.display = 'flex';
-            const btnPrev = document.getElementById('btn_prev_date');
-            const btnNext = document.getElementById('btn_next_date');
-            const dateLabel = document.getElementById('current_history_date_label');
-
-            btnPrev.disabled = currentHistoryDateIndex >= uniqueHistoryDates.length - 1; 
-            btnNext.disabled = currentHistoryDateIndex <= 0; 
-            btnPrev.style.opacity = btnPrev.disabled ? '0.3' : '1';
-            btnNext.style.opacity = btnNext.disabled ? '0.3' : '1';
-
-            const currentDateStr = uniqueHistoryDates[currentHistoryDateIndex];
-            const formatDate = (dateStr) => { 
-                if(!dateStr) return "";
-                const parts = String(dateStr).split('-'); 
-                return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dateStr; 
-            };
-            dateLabel.innerText = "📅 Ngày " + formatDate(currentDateStr);
-
-            const matchesForDate = currentFilteredMatches.filter(m => m.date === currentDateStr);
-
-            [...matchesForDate].forEach((m) => {
-                const w1 = m.winner === 'team1'; 
-                const absoluteIndex = currentFilteredMatches.indexOf(m);
-                const stt = absoluteIndex + 1;
-                const shortTime = (m.time && String(m.time).length > 5) ? String(m.time).substring(0, 5) : (m.time || '--:--');
-                
-                const getAva = (name) => {
-                    if (!name || name === 'undefined') return '';
-                    return playerAvatars[name] ? `<img src="${playerAvatars[name]}">` : String(name).charAt(0).toUpperCase();
-                };
-
-                const team1 = Array.isArray(m.team1) ? m.team1 : [];
-                const team2 = Array.isArray(m.team2) ? m.team2 : [];
-
-                const t1_p1 = team1[0] || 'Player'; const t1_p2 = team1[1] || '';
-                const t2_p1 = team2[0] || 'Player'; const t2_p2 = team2[1] || '';
-
-                grid.innerHTML += `
-                <div class="match-card-v2">
-                    <div class="match-info-header">TRẬN #${stt} | 🕒 ${shortTime}</div>
-                    <div class="match-battle-area">
-                        <div class="team-col ${w1 ? 'winner' : 'loser'}">
-                            ${w1 ? '<div class="stamp win">WIN</div>' : '<div class="stamp lose">LOSE</div>'}
-                            <div class="avatar-split-container ${!t1_p2 ? 'single-mode' : ''}">
-                                <div class="ava-p1">${getAva(t1_p1)}</div>
-                                ${t1_p2 ? `<div class="diagonal-line"></div><div class="ava-p2">${getAva(t1_p2)}</div>` : ''}
-                            </div>
-                            <div class="team-names-v2">${t1_p1} <br> ${t1_p2}</div>
-                        </div>
-                        <div class="vs-col">
-                            <div class="vs-fire-text">VS</div>
-                            <div class="bet-badge">Cược: ${m.bet} Đ</div>
-                            ${m.water > 0 ? `<div class="bet-badge water-badge" style="background:var(--secondary); color:#fff; border-color:var(--secondary);">🥤 Nước: ${m.water}</div>` : ''}
-                            ${m.score ? `<div class="bet-badge score-badge">🎯 ${m.score}</div>` : ''}
-                        </div>
-                        <div class="team-col ${!w1 ? 'winner' : 'loser'}">
-                            ${!w1 ? '<div class="stamp win">WIN</div>' : '<div class="stamp lose">LOSE</div>'}
-                            <div class="avatar-split-container ${!t2_p2 ? 'single-mode' : ''}">
-                                <div class="ava-p1">${getAva(t2_p1)}</div>
-                                ${t2_p2 ? `<div class="diagonal-line"></div><div class="ava-p2">${getAva(t2_p2)}</div>` : ''}
-                            </div>
-                            <div class="team-names-v2">${t2_p1} <br> ${t2_p2}</div>
-                        </div>
-                    </div>
-                    ${userRole === 'admin' ? `
-                    <div class="card-actions">
-                        <button class="btn-outline" style="padding: 8px 15px;" onclick="editMatch(${m.id})">✏️ Sửa</button>
-                        <button class="btn-danger" style="padding: 8px 15px;" onclick="deleteMatch(${m.id})">🗑️ Xóa</button>
-                    </div>` : ''}
-                </div>`;
-            });
-        } catch(e) { console.error("History render error", e); }
-    }
-
-    let myRadarChart;
-    
-    function openFutCardModal(name, m, w, p, h, water, m_dub, w_dub, winPoints, maxM, maxWin) {
-        currentCardName = name;
-        
-        // 1. VẪN GIỮ CÁCH TÍNH OVR CŨ ĐỂ PHÂN LOẠI THẺ CHO CHUẨN
-        const winRate = m > 0 ? Math.round((w / m) * 100) : 0;
-        const act = m > 0 ? Math.round((m / maxM) * 100) : 0;
-        const bet = Math.round((winPoints / maxWin) * 100);
-        
-        const avgGap = m > 0 ? (h / m) : 0;
-        let gapScore = Math.round(50 + (avgGap * 5)); 
-        gapScore = Math.max(0, Math.min(100, gapScore));
-        
-        const dubRate = m_dub > 0 ? Math.round((w_dub / m_dub) * 100) : 0;
-        
-        let wtrScore = Math.round(50 + (water * 2));
-        wtrScore = Math.max(0, Math.min(100, wtrScore));
-
-        const ovr = Math.round((winRate + act + bet + gapScore + dubRate + wtrScore) / 6);
-        const l = m - w; // Tính số trận thua
-
-        // 2. PHÂN LOẠI THẺ VÀ DANH HIỆU
-        let theme = "card-silver"; let pos = "TÂN BINH";
-        if(ovr >= 80 || p > 20) { theme = "card-vip"; pos = "GÁNH TEAM"; }
-        else if(ovr >= 65 || p > 5) { theme = "card-gold"; pos = "SÁT THỦ"; }
-        else if(water < -10) { theme = "card-red"; pos = "BÁO THỦ"; }
-        else if(gapScore >= 70) { theme = "card-silver"; pos = "TOP THỦ"; }
-        else if(act >= 80) { theme = "card-bronze"; pos = "CÀY ẢI"; }
-
-        // 3. ĐỔI DỮ LIỆU THÔ VÀO DOM (Mới)
-        document.getElementById('fut_name').innerText = name;
-        document.getElementById('fut_ovr').innerText = ovr;
-        document.getElementById('fut_pos').innerText = pos;
-        document.getElementById('player_fut_card').className = "fut-card " + theme;
-
-        // Gắn số liệu vào 6 dòng text
-        document.getElementById('fut_match').innerText = m;
-        document.getElementById('fut_winrate').innerText = winRate;
-        document.getElementById('fut_wl').innerText = w + '/' + l;
-        document.getElementById('fut_point').innerText = p > 0 ? '+' + p : p;
-        document.getElementById('fut_water').innerText = water > 0 ? '+' + water : water;
-        document.getElementById('fut_h').innerText = h > 0 ? '+' + h : h;
-        
-        // Đổi màu text cho sinh động (Âm màu đỏ, Dương màu xanh)
-        document.getElementById('fut_point').style.color = p < 0 ? "#ff4757" : (p > 0 ? "#2ecc71" : "#fff");
-        document.getElementById('fut_water').style.color = water < 0 ? "#ff4757" : (water > 0 ? "#3498db" : "#fff");
-        document.getElementById('fut_h').style.color = h < 0 ? "#ff4757" : "#fff";
-
-        const avaHtml = playerAvatars[name] ? `<img src="${playerAvatars[name]}">` : `<div style="font-size:80px; font-weight:900; color:rgba(255,255,255,0.5); width:100%; height:100%; display:flex; align-items:center; justify-content:center; padding-bottom: 20px;">${name.charAt(0).toUpperCase()}</div>`;
-        document.getElementById('fut_avatar').innerHTML = avaHtml;
-
-        // 4. VẼ BIỂU ĐỒ VÒNG TRÒN DOUGHNUT HIỂN THỊ OVR
-        const ctx = document.getElementById('radarChart').getContext('2d');
-        if(myRadarChart) myRadarChart.destroy();
-        
-        // Đồng bộ màu vòng cung với màu viền của thẻ bài
-        let borderColor = "#bdc3c7"; 
-        if(theme === 'card-vip') { borderColor = "#00f2fe"; }
-        if(theme === 'card-gold') { borderColor = "#f1c40f"; }
-        if(theme === 'card-red') { borderColor = "#ff4757"; }
-        if(theme === 'card-bronze') { borderColor = "#e67e22"; }
-
-        myRadarChart = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Overall', 'Còn Lại'],
-                datasets: [{
-                    data: [ovr, Math.max(0, 100 - ovr)],
-                    backgroundColor: [borderColor, 'rgba(255, 255, 255, 0.1)'], // Phần sáng và phần tối
-                    borderWidth: 0,
-                    borderRadius: [10, 0], // Bo tròn đầu mút cực xịn
-                    cutout: '75%' // Độ rỗng
-                }]
-            },
-            options: {
-                animation: { duration: 0 }, // Tắt hoạt ảnh để chụp màn hình ko bị lỗi
-                responsive: true, 
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false }, tooltip: { enabled: false } },
-            },
-            plugins: [{
-                // Plugin để in chữ OVR siêu to khổng lồ vào chính giữa
-                id: 'textCenter',
-                beforeDraw: function(chart) {
-                    var width = chart.width, height = chart.height, ctx = chart.ctx;
-                    ctx.restore();
-                    var fontSize = (height / 80).toFixed(2);
-                    ctx.font = "900 " + fontSize + "em sans-serif";
-                    ctx.textBaseline = "middle";
-                    ctx.fillStyle = "#fff";
-                    var text = ovr.toString(),
-                        textX = Math.round((width - ctx.measureText(text).width) / 2),
-                        textY = height / 2;
-                    ctx.fillText(text, textX, textY);
-                    ctx.save();
-                }
-            }]
-        });
-
-        document.getElementById('stats_modal').style.display = "flex";
-    }
-
-    function closeStatsModal() { document.getElementById('stats_modal').style.display = "none"; }
-
-        function downloadSingleCard() {
-        const area = document.getElementById('capture_card_area');
-        document.getElementById('loading_text').innerText = "📸 Đang tạo ảnh thẻ bài 3D...";
-        document.getElementById('loading').style.display = 'flex';
-
-        setTimeout(() => {
-            html2canvas(area, { 
-                scale: 3, 
-                backgroundColor: null,
-                logging: false,
-                useCORS: true 
-            }).then(canvas => {
-                let link = document.createElement('a');
-                link.download = `The-Bai-${currentCardName}.png`;
-                link.href = canvas.toDataURL('image/png');
-                link.click();
-                document.getElementById('loading').style.display = 'none';
-            });
-        }, 500);
-    }
-
-    window.onclick = function(event) {
-        const modal = document.getElementById('stats_modal');
-        if (event.target == modal) closeStatsModal();
-    }
-
-    function toggleMatchType() {
-        const isDon = document.querySelector('input[name="match_type"]:checked').value === 'don';
-        const p2Fields = [document.getElementById('t1_p2'), document.getElementById('t2_p2')];
-        
-        p2Fields.forEach(el => {
-            el.style.display = isDon ? 'none' : 'block';
-            if (isDon) el.value = ''; 
-        });
-    }
-// --- LOGIC: LỊCH SỬ ĐỐI ĐẦU (H2H) ---
-function checkHeadToHead() {
-    const t1 = [document.getElementById('t1_p1').value.trim(), document.getElementById('t1_p2').value.trim()].filter(Boolean).sort().join(' & ');
-    const t2 = [document.getElementById('t2_p1').value.trim(), document.getElementById('t2_p2').value.trim()].filter(Boolean).sort().join(' & ');
-    
-    const h2hBox = document.getElementById('h2h_result');
-    if(!h2hBox) return; // Bảo vệ lỗi nếu chưa thêm div vào HTML
-    
-    if(!t1 || !t2) { h2hBox.style.display = 'none'; return; } // Chưa nhập đủ thì ẩn
-    
-    let t1Wins = 0, t2Wins = 0;
-    matches.forEach(m => {
-        const mt1 = (Array.isArray(m.team1) ? m.team1 : []).filter(Boolean).sort().join(' & ');
-        const mt2 = (Array.isArray(m.team2) ? m.team2 : []).filter(Boolean).sort().join(' & ');
-        
-        // Kiểm tra xem 2 đội này đã từng gặp nhau chưa (có thể bị đảo ngược vị trí Đội 1 Đội 2)
-        if ((mt1 === t1 && mt2 === t2) || (mt1 === t2 && mt2 === t1)) {
-            const isT1MatchTeam1 = (mt1 === t1);
-            if (m.winner === 'team1') {
-                isT1MatchTeam1 ? t1Wins++ : t2Wins++;
-            } else if (m.winner === 'team2') {
-                isT1MatchTeam1 ? t2Wins++ : t1Wins++;
-            }
-        }
-    });
-    
-    if (t1Wins > 0 || t2Wins > 0) {
-        h2hBox.style.display = 'block';
-        h2hBox.innerHTML = `⚔️ H2H: [${t1Wins}] - [${t2Wins}]`;
-    } else {
-        h2hBox.style.display = 'block';
-        h2hBox.innerHTML = `⚔️ Lần đầu chạm trán`;
-    }
-}
-
-// Bắt sự kiện người dùng nhấp ra ngoài ô nhập tên để tự động tính H2H
-document.addEventListener("DOMContentLoaded", function() {
-    const inputIds = ['t1_p1', 't1_p2', 't2_p1', 't2_p2'];
-    inputIds.forEach(id => {
-        const input = document.getElementById(id);
-        if(input) {
-            input.addEventListener('blur', checkHeadToHead); 
-        }
-    });
-});
-
-let currentWrappedIndex = 0;
-let wrappedSlidesData = [];
-let wrappedTimer;
-
-function showMonthlyWrapped() {
-    // 1. Chuẩn bị dữ liệu từ mảng arrFiltered (Dữ liệu bảng xếp hạng hiện tại)
-    // Lấy top 1 điểm
-    let top1 = arrFiltered.length > 0 ? arrFiltered[0] : null;
-    // Lấy top nợ nước (nhỏ nhất)
-    let waterKing = [...arrFiltered].sort((a, b) => a.waterBalance - b.waterBalance)[0];
-    // Lấy người cày nhiều trận nhất
-    let ironMan = [...arrFiltered].sort((a, b) => b.m - a.m)[0];
-    
-    let totalMatches = matches.filter(m => m.date >= document.getElementById('date_from').value && m.date <= document.getElementById('date_to').value).length;
-
-    if(totalMatches === 0) { alert("Tháng này chưa có trận đấu nào để tổng kết!"); return; }
-
-    // 2. Tạo kịch bản Slides
-    wrappedSlidesData = [
-        { bg: 'bg-slide-1', title: 'Tháng vừa qua...', val: totalMatches, desc: 'trận đấu nảy lửa đã diễn ra trên sân của chúng ta. Mồ hôi, tiếng cười và cả những cú vấp ngã!' },
-    ];
-
-    if(top1 && top1.p > 0) {
-        wrappedSlidesData.push({ bg: 'bg-slide-2', title: '👑 Kẻ Hủy Diệt', val: top1.n, desc: `Không có đối thủ! Mang về +${top1.p} điểm với ${top1.w} trận thắng.` });
-    }
-    if(waterKing && waterKing.waterBalance < 0) {
-        wrappedSlidesData.push({ bg: 'bg-slide-3', title: '🥤 Thần Nước', val: waterKing.n, desc: `Nhà tài trợ vàng của tháng. Đã cống hiến ${Math.abs(waterKing.waterBalance)} ly nước cho anh em!` });
-    }
-    if(ironMan && ironMan.m > 0) {
-        wrappedSlidesData.push({ bg: 'bg-slide-4', title: '🤖 Cỗ Máy', val: ironMan.n, desc: `Thể lực vô cực! Đã ra sân cày ải tổng cộng ${ironMan.m} trận.` });
-    }
-
-    // 3. Render HTML
-    let progressHtml = '';
-    let slidesHtml = '';
-    wrappedSlidesData.forEach((slide, i) => {
-        progressHtml += `<div class="wrapped-bar"><div class="wrapped-bar-fill" id="wrap_fill_${i}"></div></div>`;
-        slidesHtml += `
-            <div class="wrapped-slide ${slide.bg}" id="wrap_slide_${i}">
-                <div class="wrapped-title">${slide.title}</div>
-                <div class="wrapped-value">${slide.val}</div>
-                <div class="wrapped-desc">${slide.desc}</div>
-                ${i === wrappedSlidesData.length - 1 ? '<button class="btn-outline" style="margin-top:30px; background:rgba(0,0,0,0.5); border:none;" onclick="closeWrapped()">Kết Thúc</button>' : ''}
-            </div>
-        `;
-    });
-
-    document.getElementById('wrapped_progress_container').innerHTML = progressHtml;
-    document.getElementById('wrapped_slides_container').innerHTML = slidesHtml;
-    
-    document.getElementById('wrapped_modal').style.display = 'flex';
-    currentWrappedIndex = 0;
-    playWrappedSlide(0);
-}
-
-function playWrappedSlide(index) {
-    if(index >= wrappedSlidesData.length) { closeWrapped(); return; }
-    
-    // Reset tất cả
-    clearTimeout(wrappedTimer);
-    document.querySelectorAll('.wrapped-slide').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.wrapped-bar-fill').forEach((el, i) => {
-        el.style.transition = 'none';
-        el.style.width = i < index ? '100%' : '0%';
-    });
-
-    // Kích hoạt slide hiện tại
-    document.getElementById(`wrap_slide_${index}`).classList.add('active');
-    
-    // Animation thanh tiến trình (Chạy trong 4 giây)
-    setTimeout(() => {
-        let currentFill = document.getElementById(`wrap_fill_${index}`);
-        if(currentFill) {
-            currentFill.style.transition = 'width 4s linear';
-            currentFill.style.width = '100%';
-        }
-    }, 50);
-
-    // Tự động chuyển slide sau 4 giây
-    wrappedTimer = setTimeout(() => {
-        nextWrappedSlide();
-    }, 4000);
-}
-
-function nextWrappedSlide() {
-    currentWrappedIndex++;
-    playWrappedSlide(currentWrappedIndex);
-}
-
-function prevWrappedSlide() {
-    if(currentWrappedIndex > 0) {
-        currentWrappedIndex--;
-        playWrappedSlide(currentWrappedIndex);
-    }
-}
-
-function closeWrapped() {
-    clearTimeout(wrappedTimer);
-    document.getElementById('wrapped_modal').style.display = 'none';
-}
-
-// ==========================================
-// THUẬT TOÁN GHÉP KÈO CÂN BẰNG
-// ==========================================
-function autoMatchmake() {
-    const inputs = [
-        document.getElementById('t1_p1'),
-        document.getElementById('t1_p2'),
-        document.getElementById('t2_p1'),
-        document.getElementById('t2_p2')
-    ];
-    
-    // Lấy tên 4 người
-    const players = inputs.map(input => input.value.trim()).filter(Boolean);
-    
-    if(players.length < 4) {
-        alert("❌ Vui lòng nhập đủ tên 4 người chơi để hệ thống chia đội!");
-        return;
-    }
-
-    // Hàm lấy điểm của người chơi từ biến arrFiltered
-    const getScore = (playerName) => {
-        const pInfo = typeof arrFiltered !== 'undefined' ? arrFiltered.find(p => p.n === playerName) : null;
-        return pInfo ? pInfo.p : 0; 
-    };
-
-    const pData = players.map(name => ({ name: name, score: getScore(name) }));
-    
-    const combos = [
-        { t1: [pData[0], pData[1]], t2: [pData[2], pData[3]] },
-        { t1: [pData[0], pData[2]], t2: [pData[1], pData[3]] },
-        { t1: [pData[0], pData[3]], t2: [pData[1], pData[2]] }
-    ];
-
-    let bestCombo = null;
-    let minDiff = Infinity;
-
-    // Tìm tổ hợp có độ lệch sức mạnh nhỏ nhất
-    combos.forEach(combo => {
-        const score1 = combo.t1[0].score + combo.t1[1].score;
-        const score2 = combo.t2[0].score + combo.t2[1].score;
-        const diff = Math.abs(score1 - score2);
-        
-        if (diff < minDiff) {
-            minDiff = diff;
-            bestCombo = combo;
-        }
-    });
-
-    // Cập nhật lại giao diện
-    if(bestCombo) {
-        inputs[0].value = bestCombo.t1[0].name;
-        inputs[1].value = bestCombo.t1[1].name;
-        inputs[2].value = bestCombo.t2[0].name;
-        inputs[3].value = bestCombo.t2[1].name;
-        
-        inputs.forEach(input => {
-            input.style.backgroundColor = 'rgba(46, 204, 113, 0.3)';
-            setTimeout(() => input.style.backgroundColor = 'var(--bg-input)', 500);
-        });
-
-        if(typeof checkHeadToHead === 'function') checkHeadToHead();
-    }
-}
-
-// --- HÀM SUBMIT ĐỔI MẬT KHẨU ---
-function submitChangePassword() {
-    const p1 = document.getElementById('cp_new_pass').value;
-    const p2 = document.getElementById('cp_confirm_pass').value;
-    
-    if(!p1 || !p2) { 
-        alert("Vui lòng nhập đầy đủ mật khẩu!"); 
-        return; 
-    }
-    if(p1 !== p2) { 
-        alert("❌ Mật khẩu nhập lại không khớp!"); 
-        return; 
-    }
-    
-    sendAPI({ action: 'change_password', new_password: p1 }, res => {
-        if(res.status === 'success') {
-            alert("✅ Đổi mật khẩu thành công!");
-            document.getElementById('change_pass_modal').style.display = 'none';
-            document.getElementById('cp_new_pass').value = '';
-            document.getElementById('cp_confirm_pass').value = '';
-        } else {
-            alert(res.message || "❌ Lỗi hệ thống khi đổi mật khẩu!");
-        }
-    });
-}
-
-// ==========================================
-// TÍNH NĂNG NHẬP GIỌNG NÓI (GIỮ ĐỂ NÓI)
-// ==========================================
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition;
-let isRecording = false;
-
-if (SpeechRecognition) {
-    recognition = new SpeechRecognition();
-    recognition.lang = 'vi-VN'; 
-    recognition.continuous = true; // Cho phép nghe liên tục đến khi thả tay
-    recognition.interimResults = false;
-
-    recognition.onerror = function(event) {
-        console.error('Lỗi nhận diện:', event.error);
-        resetVoiceButton();
-    };
-
-    recognition.onresult = function(event) {
-        // Lấy đoạn text cuối cùng sau khi thả tay
-        let transcript = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-            transcript += event.results[i][0].transcript;
-        }
-        transcript = transcript.toLowerCase();
-        console.log("Hệ thống nghe được:", transcript);
-        if(transcript.trim() !== "") {
-            parseVoiceToMatch(transcript);
-        }
-    };
-}
-
-const btnVoice = document.getElementById('btn_voice_input');
-
-// HÀM BẮT ĐẦU NGHE (KHI NHẤN XUỐNG)
-const startHold = (e) => {
-    e.preventDefault(); // Chặn menu chuột phải / bôi đen chữ
-    if (!recognition) {
-        alert("Trình duyệt không hỗ trợ. Vui lòng dùng Chrome/Safari/Edge mới nhất!");
-        return;
-    }
-    if (!isRecording) {
-        try {
-            recognition.start();
-            isRecording = true;
-            btnVoice.innerHTML = '🎙️ Đang nghe... (Thả ra để chốt)';
-            btnVoice.style.background = 'linear-gradient(145deg, #e74c3c, #c0392b)';
-            btnVoice.style.transform = 'scale(0.96)'; // Hiệu ứng lún nút
-        } catch(err) {}
-    }
-};
-
-// HÀM DỪNG NGHE (KHI THẢ TAY)
-const stopHold = (e) => {
-    e.preventDefault();
-    if (isRecording) {
-        recognition.stop(); // Ép hệ thống chốt câu nói ngay lập tức
-        isRecording = false;
-        resetVoiceButton();
-    }
-};
-
-function resetVoiceButton() {
-    if (btnVoice) {
-        btnVoice.innerHTML = '🎤 Nhấn Giữ Để Nói';
-        btnVoice.style.background = 'linear-gradient(145deg, #ff4757, #ff6b81)';
-        btnVoice.style.transform = 'scale(1)';
-    }
-}
-
-// GẮN SỰ KIỆN CHUỘT (CHO MÁY TÍNH) VÀ CẢM ỨNG (CHO ĐIỆN THOẠI)
-if (btnVoice) {
-    // Máy tính
-    btnVoice.addEventListener('mousedown', startHold);
-    btnVoice.addEventListener('mouseup', stopHold);
-    btnVoice.addEventListener('mouseleave', stopHold); // Trượt chuột ra ngoài cũng ngắt
-    
-    // Điện thoại cảm ứng
-    btnVoice.addEventListener('touchstart', startHold, {passive: false});
-    btnVoice.addEventListener('touchend', stopHold, {passive: false});
-    btnVoice.addEventListener('touchcancel', stopHold, {passive: false});
-}
-
-function parseVoiceToMatch(text) {
-    let betMatch = text.match(/(độ|cược|điểm)\s*(\d+)/i);
-    let waterMatch = text.match(/nước\s*(\d+)/i);
-    
-    if (betMatch) {
-        document.getElementById('bet_amount').value = betMatch[2];
-        text = text.replace(betMatch[0], ''); 
-    } else {
-        document.getElementById('bet_amount').value = "1";
-    }
-
-    if (waterMatch) {
-        document.getElementById('water_amount').value = waterMatch[2];
-        text = text.replace(waterMatch[0], ''); 
-    } else {
-        document.getElementById('water_amount').value = "0";
-    }
-
-    let teamSplitters = [' đấu với ', ' đánh với ', ' đấu ', ' gặp ', ' vs '];
-    let teams = [];
-    for (let splitter of teamSplitters) {
-        if (text.includes(splitter)) {
-            teams = text.split(splitter);
-            break;
-        }
-    }
-
-    if (teams.length < 2) {
-        alert(`Máy nghe được: "${text}"\nThiếu từ khóa nối. Vui lòng đọc chữ "đấu" hoặc "gặp" ở giữa 2 đội.`);
-        return;
-    }
-
-    let parsePlayers = (teamText) => {
-        let players = teamText.split(/\s+và\s+|\s+với\s+|,/);
-        return players.map(p => formatName(p.trim())).filter(p => p);
-    };
-
-    let t1Players = parsePlayers(teams[0]);
-    let t2Players = parsePlayers(teams[1]);
-
-    document.getElementById('t1_p1').value = t1Players[0] || '';
-    document.getElementById('t1_p2').value = t1Players[1] || '';
-    document.getElementById('t2_p1').value = t2Players[0] || '';
-    document.getElementById('t2_p2').value = t2Players[1] || '';
-
-    const radioT1 = document.querySelector('input[name="manual_winner"][value="team1"]');
-    if(radioT1) radioT1.checked = true;
-    if(typeof highlightManualWinner === 'function') highlightManualWinner();
-    
-    if(typeof checkHeadToHead === 'function') checkHeadToHead();
-    
-    if (navigator.vibrate) navigator.vibrate(200);
-}
-
-</script>
-
-<!-- MODAL ĐỔI MẬT KHẨU (Nằm đúng chuẩn ngoài thẻ script) -->
-<div id="change_pass_modal" class="stats-modal">
-    <div class="modal-content-wrapper" style="width: 350px;">
-        <span class="close-modal" onclick="document.getElementById('change_pass_modal').style.display='none'">&times;</span>
-        <h3 style="color: var(--primary); margin-top:0; margin-bottom: 20px;">🔑 Đổi Mật Khẩu</h3>
-        <input type="password" id="cp_new_pass" placeholder="Nhập mật khẩu mới">
-        <input type="password" id="cp_confirm_pass" placeholder="Nhập lại mật khẩu mới">
-        <button class="btn-success" onclick="submitChangePassword()" style="width: 100%; margin-top: 15px; padding: 15px;">💾 Cập Nhật Mật Khẩu</button>
     </div>
-</div>
 
+    <!-- LIÊN KẾT FILE JAVASCRIPT TÁCH RIÊNG -->
+    <script src="script.js" defer></script>
 </body>
 </html>
