@@ -216,7 +216,7 @@ if (!$conn->connect_error) {
                 $m = $input['match'];
                 $stmt = $conn->prepare("INSERT INTO matches (id, group_id, match_date, match_time, team1, team2, bet, water, score, winner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $t1 = json_encode($m['team1'], JSON_UNESCAPED_UNICODE); $t2 = json_encode($m['team2'], JSON_UNESCAPED_UNICODE);
-                $stmt->bind_param("iissssiiss", $m['id'], $grp_id, $m['date'], $m['time'], $t1, $t2, $m['bet'], $m['water'], $m['score'], $m['winner']);
+                $stmt->bind_param("sissssiiss", $m['id'], $grp_id, $m['date'], $m['time'], $t1, $t2, $m['bet'], $m['water'], $m['score'], $m['winner']);
                 $stmt->execute();
                 sendResponse(['status' => 'success']);
             }
@@ -225,14 +225,14 @@ if (!$conn->connect_error) {
                 $m = $input['match'];
                 $stmt = $conn->prepare("UPDATE matches SET match_date=?, team1=?, team2=?, bet=?, water=?, score=?, winner=? WHERE id=? AND group_id=?");
                 $t1 = json_encode($m['team1'], JSON_UNESCAPED_UNICODE); $t2 = json_encode($m['team2'], JSON_UNESCAPED_UNICODE);
-                $stmt->bind_param("sssiissii", $m['date'], $t1, $t2, $m['bet'], $m['water'], $m['score'], $m['winner'], $m['id'], $grp_id);
+                $stmt->bind_param("sssiisssi", $m['date'], $t1, $t2, $m['bet'], $m['water'], $m['score'], $m['winner'], $m['id'], $grp_id);
                 $stmt->execute();
                 sendResponse(['status' => 'success']);
             }
 
             if ($action === 'delete' && $role === 'admin') {
                 $stmt = $conn->prepare("DELETE FROM matches WHERE id=? AND group_id=?");
-                $stmt->bind_param("ii", $input['id'], $grp_id);
+                $stmt->bind_param("si", $input['id'], $grp_id);
                 $stmt->execute();
                 sendResponse(['status' => 'success']);
             }
@@ -314,7 +314,7 @@ if (!$conn->connect_error) {
                 if ($result && $result->num_rows > 0) {
                     while($row = $result->fetch_assoc()) {
                         $matchesData[] = [
-                            'id' => (int)$row['id'], 'date' => $row['match_date'], 'time' => $row['match_time'],
+                            'id' => (float)$row['id'], 'date' => $row['match_date'], 'time' => $row['match_time'],
                             'team1' => json_decode($row['team1'], true), 'team2' => json_decode($row['team2'], true),
                             'bet' => (int)$row['bet'], 
                             'water' => isset($row['water']) ? (int)$row['water'] : 0, 
