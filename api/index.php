@@ -342,7 +342,7 @@ if (!$conn->connect_error) {
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
     <!-- LIÊN KẾT FILE CSS TÁCH RIÊNG -->
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=<?php echo time(); ?>">
 </head>
 <body class="dark-mode">
 
@@ -701,6 +701,6 @@ if (!$conn->connect_error) {
     </div>
 
     <!-- LIÊN KẾT FILE JAVASCRIPT TÁCH RIÊNG -->
-    <script src="script.js" defer></script>
+    <script src="script.js?v=<?php echo time(); ?>" defer></script>
 </body>
 </html>
