@@ -53,10 +53,16 @@ if (!$conn->connect_error) {
     mysqli_report(MYSQLI_REPORT_OFF);
 // Tự động thêm cột match_time nếu database đang bị thiếu
     // --- TỰ ĐỘNG NÂNG CẤP DATABASE ---
-    $conn->query("ALTER TABLE matches MODIFY COLUMN id BIGINT"); // Mở rộng ID để lưu được chuỗi Date.now()
-    $conn->query("ALTER TABLE matches ADD COLUMN match_time VARCHAR(20) DEFAULT NULL"); // Cột giờ
-    $conn->query("ALTER TABLE matches ADD COLUMN water INT DEFAULT 0"); // Cột tiền nước
-    $conn->query("ALTER TABLE matches ADD COLUMN score VARCHAR(50) DEFAULT NULL"); // Cột tỉ số
+    $conn->query("ALTER TABLE matches MODIFY COLUMN id BIGINT");
+    $conn->query("ALTER TABLE matches ADD COLUMN match_time VARCHAR(20) DEFAULT NULL");
+    $conn->query("ALTER TABLE matches ADD COLUMN water INT DEFAULT 0");
+    $conn->query("ALTER TABLE matches ADD COLUMN score VARCHAR(50) DEFAULT NULL");
+    
+    // --- CÁC CỘT MỚI BỔ SUNG ĐỂ SỬA LỖI UNKNOWN COLUMN ---
+    $conn->query("ALTER TABLE matches ADD COLUMN team1 TEXT DEFAULT NULL");
+    $conn->query("ALTER TABLE matches ADD COLUMN team2 TEXT DEFAULT NULL");
+    $conn->query("ALTER TABLE matches ADD COLUMN winner VARCHAR(20) DEFAULT NULL");
+    $conn->query("ALTER TABLE matches ADD COLUMN bet INT DEFAULT 1");
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         $action = $input['action'] ?? '';
