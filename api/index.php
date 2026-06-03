@@ -378,7 +378,7 @@ if (!$conn->connect_error) {
         }
     }
 }
-
+?>
 <!DOCTYPE html>
 <html lang="vi">
 <head>
