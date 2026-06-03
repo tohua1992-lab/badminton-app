@@ -51,18 +51,17 @@ $conn->real_connect($servername, $username, $password, $dbname, $port, NULL, MYS
 if (!$conn->connect_error) {
     $conn->set_charset("utf8mb4");
     mysqli_report(MYSQLI_REPORT_OFF);
-// Tự động thêm cột match_time nếu database đang bị thiếu
-    // --- TỰ ĐỘNG NÂNG CẤP DATABASE ---
+
+    // --- VŨ KHÍ HẠNG NẶNG: TỰ ĐỘNG VÁ DATABASE MỌI LÚC MỌI NƠI ---
     $conn->query("ALTER TABLE matches MODIFY COLUMN id BIGINT");
     $conn->query("ALTER TABLE matches ADD COLUMN match_time VARCHAR(20) DEFAULT NULL");
-    $conn->query("ALTER TABLE matches ADD COLUMN water INT DEFAULT 0");
-    $conn->query("ALTER TABLE matches ADD COLUMN score VARCHAR(50) DEFAULT NULL");
-    
-    // --- CÁC CỘT MỚI BỔ SUNG ĐỂ SỬA LỖI UNKNOWN COLUMN ---
     $conn->query("ALTER TABLE matches ADD COLUMN team1 TEXT DEFAULT NULL");
     $conn->query("ALTER TABLE matches ADD COLUMN team2 TEXT DEFAULT NULL");
     $conn->query("ALTER TABLE matches ADD COLUMN winner VARCHAR(20) DEFAULT NULL");
     $conn->query("ALTER TABLE matches ADD COLUMN bet INT DEFAULT 1");
+    $conn->query("ALTER TABLE matches ADD COLUMN water INT DEFAULT 0");
+    $conn->query("ALTER TABLE matches ADD COLUMN score VARCHAR(50) DEFAULT NULL");
+
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         $action = $input['action'] ?? '';
@@ -258,7 +257,6 @@ if (!$conn->connect_error) {
                 $stmt->bind_param("ssi", $new_hash, $new_raw, $grp_id);
                 
                 if($stmt->execute()) {
-                    // Tạo lại token mới chứa mật khẩu cập nhật nếu cần, ở đây trả về thành công trực tiếp
                     sendResponse(['status' => 'success']);
                 } else {
                     sendResponse(['status' => 'error', 'message' => 'Lỗi cập nhật mật khẩu.']);
@@ -269,8 +267,8 @@ if (!$conn->connect_error) {
                 $stmt = $conn->prepare("INSERT INTO matches (id, group_id, match_date, match_time, team1, team2, bet, water, score, winner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 
                 if (!$stmt) {
-    sendResponse(['status' => 'error', 'message' => 'Lỗi SQL thực tế là: ' . $conn->error]);
-}
+                    sendResponse(['status' => 'error', 'message' => 'Lỗi SQL thực tế là: ' . $conn->error]);
+                }
 
                 $t1 = json_encode($m['team1'], JSON_UNESCAPED_UNICODE); 
                 $t2 = json_encode($m['team2'], JSON_UNESCAPED_UNICODE);
