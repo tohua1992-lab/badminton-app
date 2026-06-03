@@ -56,7 +56,7 @@ function sendAPI(payload, callback, silent = false) {
     if (!silent) document.getElementById('loading').style.display = 'flex';
     fetch(window.location.href, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(res => res.json())
-    .then(data => { if (!silent) document.getElementById('loading').style.none; if(callback) callback(data); })
+    .then(data => { if (!silent) document.getElementById('loading').style.display = 'none'; if(callback) callback(data); })
     .catch(err => { 
         if (!silent) {
             document.getElementById('loading').style.display = 'none';
@@ -270,7 +270,6 @@ function generateMonthlyReport() {
                 <td>${p.water > 0 ? '+'+p.water : p.water}</td>
                 <td>${p.h > 0 ? '+'+p.h : p.h}</td>
                 <td style="font-size:16px;"><strong>${p.p > 0 ? '+'+p.p : p.p}</strong></td>
-                <td style="font-weight:bold; color:var(--primary);">${p.m > 0 ? Math.round((p.w / p.m) * 100) : 0}%</td>
             </tr>`;
     });
 
@@ -282,8 +281,7 @@ function generateMonthlyReport() {
     sorted.forEach(p => {
         const winRate = p.m > 0 ? Math.round((p.w / p.m) * 100) : 0;
         let avaHtml = playerAvatars[p.n] ? `<img src="${playerAvatars[p.n]}">` : String(p.n).charAt(0).toUpperCase();
-        const safeName = p.n ? String(p.n).replace(/'/g, "\'").replace(/"/g, '&quot;').replace(/
-/g, ' ') : 'Unknown';
+        const safeName = p.n ? String(p.n).replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\\n/g, ' ') : 'Unknown';
         
         statsContainer.innerHTML += `
             <div class="stat-card" style="cursor: pointer;" onclick="openFutCardModal('${safeName}', ${p.m}, ${p.w}, ${p.p}, ${p.h}, ${p.water}, ${p.m_dub}, ${p.w_dub}, ${p.winPoints}, ${maxM}, ${maxWinPoints})">

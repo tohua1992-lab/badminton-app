@@ -451,7 +451,7 @@ if (!$conn->connect_error) {
         <h1 id="app_title">🏆 Bảng Phong Thần 3D</h1>
         <div style="display: flex; align-items: center; gap: 15px;">
             <span id="user_role_badge" style="font-weight: 900; color: var(--text-muted); background: var(--bg-input); padding: 8px 15px; border-radius: 12px; box-shadow: var(--shadow-inner); border: 1px solid var(--border-color);"></span>
-		<button id="btn_change_pass" class="admin-only btn-warning" onclick="document.getElementById('change_pass_modal').style.display='flex'" style="padding: 10px 15px; display: none; color: #000;">🔑 Đổi Pass</button>
+		<button id="btn_change_pass" class="admin-only btn-warning" onclick="document.getElementById('change_pass_modal').style.display='flex'" style="padding: 10px 15px; color: #000;">🔑 Đổi Pass</button>
             <button class="theme-btn btn-outline" onclick="toggleTheme()" style="padding: 10px 15px;">☀️ Sáng</button>
             <button class="btn-danger" onclick="logout()" style="padding: 10px 15px;">Đăng Xuất</button>
         </div>

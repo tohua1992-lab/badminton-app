@@ -339,6 +339,7 @@ td { padding: 15px; text-align: center; font-size: 15px; font-weight: bold; bord
     .form-footer > div:last-child { width: 100%; flex-direction: column; }
     .form-footer > div:last-child button { width: 100%; }
     .history-grid { grid-template-columns: 1fr; }
+    .match-card-v2 .card-actions { opacity: 1; }
     .boards-container { gap: 15px; flex-direction: column; }
     .board-half { width: 100%; min-width: 0; padding: 15px; }
     .podium-container { min-height: 120px; margin-top: 35px; gap: 5px; }
