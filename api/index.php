@@ -3,11 +3,12 @@ error_reporting(0); // Tắt cảnh báo để không hỏng luồng JSON
 session_start();
 date_default_timezone_set('Asia/Ho_Chi_Minh');
 
-// THÔNG TIN KẾT NỐI DATABASE MỚI
-$servername = "sql100.infinityfree.com"; 
-$username = "if0_41380849";      
-$password = "BaoKhang71";   
-$dbname = "if0_41380849_badbattle";   
+// THÔNG TIN KẾT NỐI AIVEN CLOUD MỚI
+$servername = "mysql-3c964605-badmintonappver2.h.aivencloud.com"; 
+$username = "avnadmin";      
+$password = "AVNS_gUxQuakKKnm2wAMNbOW";   
+$dbname = "defaultdb";
+$port = 20789;
 
 // HÀM TRẢ VỀ JSON CHUẨN
 function sendResponse($data) {
@@ -17,13 +18,18 @@ function sendResponse($data) {
     exit;
 }
 
-$conn = new mysqli($servername, $username, $password, $dbname);
+$conn = new mysqli($servername, $username, $password, $dbname, $port);
 
 if (!$conn->connect_error) {
     $conn->set_charset("utf8mb4");
     mysqli_report(MYSQLI_REPORT_OFF); // Fix lỗi 500
 
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // TỰ ĐỘNG TẠO BẢNG CHO DATABASE MỚI TRÊN AIVEN
+    $conn->query("CREATE TABLE IF NOT EXISTS groups_account (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, raw_password VARCHAR(255) DEFAULT NULL, group_name VARCHAR(100) NOT NULL, expire_date DATE DEFAULT '2030-12-31', banner_data MEDIUMTEXT DEFAULT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+    $conn->query("CREATE TABLE IF NOT EXISTS matches (id BIGINT PRIMARY KEY, group_id INT NOT NULL, match_date DATE, match_time VARCHAR(20), team1 JSON, team2 JSON, bet INT, water INT DEFAULT 0, score VARCHAR(20) DEFAULT NULL, winner VARCHAR(10)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+    $conn->query("CREATE TABLE IF NOT EXISTS avatars (group_id INT NOT NULL, player_name VARCHAR(255) NOT NULL, image_data MEDIUMTEXT, PRIMARY KEY (group_id, player_name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         $action = $input['action'] ?? '';
 
